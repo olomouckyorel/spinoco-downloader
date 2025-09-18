@@ -1,0 +1,19 @@
+{
+  "soubor": "20250821_151918_nahrávka_193c444a.ogg",
+  "slozka": "Spinoco_Calls/2025/08",
+  "call_id": "08d532aa-7e91-11f0-a473-2f775d7c125b",
+  "recording_id": "193c444a-7e91-11f0-a473-2f775d7c125b",
+  "datum_hovoru": "2025-08-21 15:19:18",
+  "delka_ms": 143752,
+  "delka_min": 2.4,
+  "smer_hovoru": "Terminating",
+  "volajici": "+420775646545",
+  "volany": "+420583034592",
+  "je_voicemail": false,
+  "dostupny": true,
+  "ma_transkripce": false,
+  "owner_type": "ContactRequestOwner",
+  "assignee_type": "Assigned",
+  "hashtags": 0,
+  "odhadovana_velikost_mb": 1.2
+}

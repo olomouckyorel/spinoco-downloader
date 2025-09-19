@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 100
     temp_download_path: str = "./temp_downloads"
     
+    # Test mode
+    test_mode: bool = False
+    max_test_recordings: int = 5
+    local_download_path: str = "./downloaded_recordings"
+    
     @validator('supported_formats')
     def parse_supported_formats(cls, v):
         """Převede string formátů na list."""

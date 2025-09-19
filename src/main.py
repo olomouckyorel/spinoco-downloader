@@ -60,30 +60,33 @@ class SpinocoRecordingDownloader:
                 api_token=settings.spinoco_api_key,
                 base_url=settings.spinoco_base_url
             ) as spinoco_client:
-    
-    # Vytvoř SharePoint klient s OAuth2
-    if settings.use_oauth2():
-        sharepoint_client = SharePointClient(
-            site_url=settings.sharepoint_site_url,
-            client_id=settings.sharepoint_client_id,
-            client_secret=settings.sharepoint_client_secret,
-            tenant_id=settings.sharepoint_tenant_id,
-            folder_path=settings.sharepoint_folder_path
-        )
-    else:
-        sharepoint_client = SharePointClient(
-            site_url=settings.sharepoint_site_url,
-            username=settings.sharepoint_username,
-            password=settings.sharepoint_password,
-            folder_path=settings.sharepoint_folder_path
-        )
-    
-    async with sharepoint_client:
                 
-                self.logger.info("✅ Klienti úspěšně inicializováni")
-                
-                # Spusť batch processing
-                await self.process_all_recordings(spinoco_client, sharepoint_client)
+                # Vytvoř SharePoint klient s OAuth2 (jen pokud není test režim)
+                if settings.test_mode:
+                    # Test režim - bez SharePoint
+                    self.logger.info("🧪 Test režim - stahování na lokální disk")
+                    await self.process_all_recordings(spinoco_client, None)
+                else:
+                    # Produkční režim - s SharePoint
+                    if settings.use_oauth2():
+                        sharepoint_client = SharePointClient(
+                            site_url=settings.sharepoint_site_url,
+                            client_id=settings.sharepoint_client_id,
+                            client_secret=settings.sharepoint_client_secret,
+                            tenant_id=settings.sharepoint_tenant_id,
+                            folder_path=settings.sharepoint_folder_path
+                        )
+                    else:
+                        sharepoint_client = SharePointClient(
+                            site_url=settings.sharepoint_site_url,
+                            username=settings.sharepoint_username,
+                            password=settings.sharepoint_password,
+                            folder_path=settings.sharepoint_folder_path
+                        )
+                    
+                    async with sharepoint_client:
+                        self.logger.info("✅ Klienti úspěšně inicializováni")
+                        await self.process_all_recordings(spinoco_client, sharepoint_client)
                 
                 # Výsledné statistiky
                 self.log_final_stats()
@@ -125,18 +128,34 @@ class SpinocoRecordingDownloader:
             self.logger.info("✅ Žádné nové nahrávky k stažení")
             return
         
-        # Krok 2: Stáhni všechny nahrávky na SharePoint
+        # Krok 2: Stáhni nahrávky (SharePoint nebo lokálně podle test_mode)
         download_results = []
         semaphore = asyncio.Semaphore(settings.max_concurrent_downloads)
         
         download_tasks = []
+        recording_count = 0
+        
         for call in calls_with_recordings:
             recordings = spinoco_client.extract_available_recordings(call)
             for recording in recordings:
-                task = self.download_single_recording(
-                    call, recording, spinoco_client, sharepoint_client, semaphore
-                )
+                # Omez počet v test režimu
+                if settings.test_mode and recording_count >= settings.max_test_recordings:
+                    self.logger.info(f"🧪 Test režim - omezeno na {settings.max_test_recordings} nahrávek")
+                    break
+                
+                if settings.test_mode:
+                    task = self.download_single_recording_local(
+                        call, recording, spinoco_client, semaphore
+                    )
+                else:
+                    task = self.download_single_recording(
+                        call, recording, spinoco_client, sharepoint_client, semaphore
+                    )
                 download_tasks.append(task)
+                recording_count += 1
+            
+            if settings.test_mode and recording_count >= settings.max_test_recordings:
+                break
         
         # Spusť paralelně
         self.logger.info(f"⬇️ Stahuji {len(download_tasks)} nahrávek paralelně")
@@ -156,12 +175,14 @@ class SpinocoRecordingDownloader:
                 else:
                     self.stats["errors"] += 1
         
-        # Krok 4: Smaž úspěšně stažené nahrávky ze Spinoco
-        if successful_deletions:
+        # Krok 4: Smaž úspěšně stažené nahrávky ze Spinoco (jen v produkci)
+        if successful_deletions and not settings.test_mode:
             self.logger.info(f"🗑️ Mažu {len(successful_deletions)} nahrávek ze Spinoco")
             await self.delete_recordings_from_spinoco(
                 successful_deletions, spinoco_client
             )
+        elif settings.test_mode:
+            self.logger.info(f"🧪 Test režim - NEMAZÁM ze Spinoco ({len(successful_deletions)} nahrávek)")
         
         self.logger.info("✅ Batch processing dokončen")
     
@@ -184,8 +205,8 @@ class SpinocoRecordingDownloader:
                 # Vygeneruj název souboru podle metadat (max 15 slov)
                 filename = self.generate_filename_from_metadata(call, recording)
                 
-                # Určí složku podle měsíce
-                folder_path = self.get_month_folder_path(call)
+                # Všechno do jedné složky (bez podsložek)
+                folder_path = settings.sharepoint_folder_path
                 
                 self.logger.info(
                     f"⬇️ Stahuji nahrávku {recording.id}",
@@ -232,6 +253,77 @@ class SpinocoRecordingDownloader:
                 )
                 return call, recording, False
     
+    async def download_single_recording_local(
+        self,
+        call: CallTask,
+        recording: CallRecording,
+        spinoco_client: SpinocoClient,
+        semaphore: asyncio.Semaphore
+    ) -> tuple[CallTask, CallRecording, bool]:
+        """
+        Stáhne nahrávku ze Spinoco na lokální disk (test režim).
+        
+        Returns:
+            tuple: (call, recording, success)
+        """
+        async with semaphore:
+            try:
+                # Vygeneruj název souboru
+                filename = self.generate_filename_from_metadata(call, recording)
+                
+                # Všechno do jedné složky (bez podsložek)
+                local_path = Path(settings.local_download_path) / filename
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                self.logger.info(
+                    f"⬇️ Stahuji nahrávku {recording.id} (TEST - lokálně)",
+                    call_id=call.id,
+                    filename=filename,
+                    local_path=str(local_path)
+                )
+                
+                # Stáhni nahrávku ze Spinoco
+                recording_data = await spinoco_client.download_recording(call.id, recording.id)
+                original_size = len(recording_data)
+                
+                # Ulož na disk
+                local_path.write_bytes(recording_data)
+                
+                # Zkontroluj velikost
+                saved_size = local_path.stat().st_size
+                if saved_size != original_size:
+                    self.logger.error(
+                        f"❌ Velikost se neshoduje: {original_size} != {saved_size}",
+                        filename=filename
+                    )
+                    return call, recording, False
+                
+                self.logger.info(
+                    f"✅ Nahrávka úspěšně uložena lokálně",
+                    filename=filename,
+                    size_mb=round(original_size / 1024 / 1024, 2),
+                    path=str(local_path)
+                )
+                
+                return call, recording, True
+                
+            except Exception as e:
+                self.logger.error(
+                    f"❌ Chyba při lokálním stahování",
+                    call_id=call.id,
+                    recording_id=recording.id,
+                    error=str(e)
+                )
+                return call, recording, False
+    
+    def get_month_folder_local(self, call: CallTask) -> str:
+        """Vrátí složku podle měsíce pro lokální ukládání."""
+        try:
+            call_time = datetime.fromtimestamp(call.lastUpdate / 1000)
+            return f"{call_time.strftime('%Y')}/{call_time.strftime('%m')}"
+        except Exception:
+            return "unknown"
+    
     async def delete_recordings_from_spinoco(
         self,
         successful_deletions: List[tuple[CallTask, CallRecording]],
@@ -268,33 +360,39 @@ class SpinocoRecordingDownloader:
     
     def generate_filename_from_metadata(self, call: CallTask, recording: CallRecording) -> str:
         """
-        Vygeneruje název souboru z metadat hovoru (max 15 slov).
+        Vygeneruje název souboru z metadat hovoru.
         
-        Formát: YYYYMMDD_HHMMSS_caller_callee.ogg
+        Formát: YYYYMMDD_HHMMSS_caller_firstdigit_duration_recordingid.ogg
         """
         try:
             # Datum z lastUpdate
             call_time = datetime.fromtimestamp(call.lastUpdate / 1000)
             date_str = call_time.strftime("%Y%m%d_%H%M%S")
             
-            # Telefonní čísla (zkrácené)
+            # Telefonní čísla
             caller, callee = self.extract_phone_numbers(call)
-            caller_short = caller[-6:] if caller else "unknown"
-            callee_short = callee[-6:] if callee else "unknown" 
+            caller_full = caller.lstrip('+') if caller else "unknown"
+            callee_first = callee.lstrip('+')[0] if callee else "0"
             
-            # Sestavit název (max 15 slov = cca 60 znaků)
-            filename = f"{date_str}_{caller_short}_{callee_short}_{recording.id[:8]}.ogg"
+            # Délka hovoru
+            duration_min = recording.duration // 1000 // 60
+            duration_sec = (recording.duration // 1000) % 60
+            duration_str = f"{duration_min}min{duration_sec}s"
             
-            # Ořízni na rozumnou délku
-            if len(filename) > 60:
-                filename = f"{date_str}_{recording.id[:8]}.ogg"
+            # Recording ID (zkrácené)
+            recording_short = recording.id[:8]
+            
+            # Sestavit název
+            filename = f"{date_str}_{caller_full}_{callee_first}_{duration_str}_{recording_short}.ogg"
             
             return filename
             
         except Exception as e:
             self.logger.warning(f"Chyba při generování názvu souboru: {e}")
             # Fallback
-            return f"{call.id}_{recording.id}.ogg"
+            call_time = datetime.fromtimestamp(call.lastUpdate / 1000)
+            date_str = call_time.strftime("%Y%m%d_%H%M%S")
+            return f"{date_str}_{recording.id[:8]}.ogg"
     
     def get_month_folder_path(self, call: CallTask) -> str:
         """Vrátí cestu ke složce podle měsíce z lastUpdate."""

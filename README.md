@@ -96,21 +96,51 @@ RETRY_DELAY_SECONDS=5
 Před prvním spuštěním aplikace doporučujeme otestovat připojení:
 
 ```bash
-python test_connection.py
+py test_connection.py
 ```
 
 Tento script ověří:
 - ✅ Kompletnost konfigurace
 - ✅ Připojení k Spinoco API
-- ✅ Připojení k SharePoint
+- ✅ Připojení k SharePoint (nebo lokální test)
 - ✅ Vytvoření cílové složky
 
-### 6. Spusť aplikaci
+### 6. Test režim (doporučeno pro první spuštění)
 
-Po úspěšném testu můžeš spustit hlavní aplikaci:
+Pro bezpečné testování nastav v `config/.env`:
+
+```env
+# Test mode - stáhni jen 5 nahrávek lokálně, nemazej ze Spinoco
+TEST_MODE=true
+MAX_TEST_RECORDINGS=5
+LOCAL_DOWNLOAD_PATH=./test_recordings
+```
+
+Pak spusť:
 
 ```bash
-python -m src.main
+py -m src.main
+```
+
+**Test režim:**
+- ✅ Stáhne jen 5 nejstarších nahrávek
+- ✅ Uloží lokálně do `./test_recordings/`
+- ✅ NEMAZÁŽE ze Spinoco
+- ✅ Zkontroluje velikosti souborů
+- ✅ Vytvoří strukturu složek podle měsíců
+
+### 7. Produkční režim
+
+Po úspěšném testu nastav:
+
+```env
+TEST_MODE=false
+```
+
+A spusť produkční verzi:
+
+```bash
+py -m src.main
 ```
 
 ## ⚙️ Konfigurace

@@ -1,171 +1,66 @@
 """
-Configuration management for Spinoco Whisper Transcriber
-
-Handles environment variables and application settings.
+Konfigurace pro Spinoco Recording Downloader
 """
-
 from pathlib import Path
 from typing import Optional
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application configuration from environment variables"""
+    """Nastavení pro Spinoco Recording Downloader"""
     
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
-    )
+    # Spinoco API Configuration
+    spinoco_api_key: str
+    spinoco_base_url: str = "https://api.spinoco.com"
+    spinoco_account_id: str
     
-    # Whisper Model Settings
-    whisper_model: str = Field(
-        default="large-v3",
-        description="Whisper model to use (tiny/base/small/medium/large/large-v3)"
-    )
+    # SharePoint OAuth2 Configuration
+    sharepoint_site_url: str
+    sharepoint_client_id: Optional[str] = None
+    sharepoint_client_secret: Optional[str] = None
+    sharepoint_tenant_id: Optional[str] = None
+    sharepoint_folder_path: str = "/Shared Documents/Spinoco Calls"
     
-    whisper_device: str = Field(
-        default="auto",
-        description="Device for Whisper (auto/cpu/cuda)"
-    )
+    # Legacy SharePoint credentials
+    sharepoint_username: Optional[str] = None
+    sharepoint_password: Optional[str] = None
     
-    whisper_language: str = Field(
-        default="cs",
-        description="Language code for transcription"
-    )
-    
-    # Processing Settings
-    batch_size: int = Field(
-        default=1,
-        description="Number of files to process simultaneously"
-    )
-    
-    enable_gpu: bool = Field(
-        default=True,
-        description="Enable GPU acceleration if available"
-    )
-    
-    temperature: float = Field(
-        default=0.0,
-        description="Whisper temperature (0.0 = deterministic)"
-    )
-    
-    beam_size: int = Field(
-        default=5,
-        description="Beam search size (1-5, higher = better quality)"
-    )
-    
-    best_of: int = Field(
-        default=5,
-        description="Number of candidates to try (1-5)"
-    )
-    
-    # Directory Configuration
-    input_dir: str = Field(
-        default="data/input",
-        description="Directory containing .ogg files to transcribe"
-    )
-    
-    output_dir: str = Field(
-        default="data/output", 
-        description="Directory for .txt transcript outputs"
-    )
-    
-    metadata_dir: str = Field(
-        default="data/metadata",
-        description="Directory for .json metadata files"
-    )
-    
-    # Logging
-    log_level: str = Field(
-        default="INFO",
-        description="Logging level (DEBUG/INFO/WARNING/ERROR)"
-    )
-    
-    log_format: str = Field(
-        default="json",
-        description="Log format (json/text)"
-    )
-    
-    # Technical Support Optimization
-    technical_prompt: bool = Field(
-        default=True,
-        description="Use technical support optimized prompts"
-    )
-    
-    initial_prompt: str = Field(
-        default="Toto je nahrávka technické podpory pro kotle a topení. Obsahuje technické termíny, kódy chyb a návody na opravu.",
-        description="Initial prompt for Whisper to improve technical transcription"
-    )
+    # Application Settings
+    log_level: str = "INFO"
+    log_file: Path = Path("./logs/spinoco_download.log")
+    max_concurrent_downloads: int = 5
+    download_batch_size: int = 100
+    retry_attempts: int = 3
+    retry_delay_seconds: int = 5
     
     # File Processing
-    skip_existing: bool = Field(
-        default=True,
-        description="Skip files that already have transcripts"
-    )
+    supported_formats: str = "ogg"
+    max_file_size_mb: int = 100
+    temp_download_path: Path = Path("./temp_downloads")
     
-    # Watch Mode
-    watch_mode: bool = Field(
-        default=False,
-        description="Continuously monitor input directory for new files"
-    )
+    # Test Mode
+    test_mode: bool = True
+    max_test_recordings: int = 5
+    local_download_path: Path = Path("./test_recordings")
     
-    watch_interval: int = Field(
-        default=5,
-        description="Seconds between directory scans in watch mode"
-    )
-    
-    def get_input_path(self) -> Path:
-        """Get input directory as Path object"""
-        return Path(self.input_dir)
-    
-    def get_output_path(self) -> Path:
-        """Get output directory as Path object"""
-        return Path(self.output_dir)
-    
-    def get_metadata_path(self) -> Path:
-        """Get metadata directory as Path object"""
-        return Path(self.metadata_dir)
-    
-    def ensure_directories(self) -> None:
-        """Create all required directories if they don't exist"""
-        self.get_input_path().mkdir(parents=True, exist_ok=True)
-        self.get_output_path().mkdir(parents=True, exist_ok=True)
-        self.get_metadata_path().mkdir(parents=True, exist_ok=True)
-    
-    def get_whisper_device(self) -> str:
-        """Determine optimal device for Whisper"""
-        if self.whisper_device == "auto":
-            try:
-                import torch
-                if torch.cuda.is_available() and self.enable_gpu:
-                    return "cuda"
-                else:
-                    return "cpu"
-            except ImportError:
-                return "cpu"
-        return self.whisper_device
-    
-    def get_whisper_config(self) -> dict:
-        """Get Whisper transcription configuration"""
-        config = {
-            "language": self.whisper_language,
-            "task": "transcribe",
-            "temperature": self.temperature,
-            "beam_size": self.beam_size,
-            "best_of": self.best_of,
-            "word_timestamps": True,
-            "prepend_punctuations": "\"'"¿([{-",
-            "append_punctuations": "\"'.。,，!！?？:：")]}、"
-        }
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
         
-        if self.technical_prompt:
-            config["initial_prompt"] = self.initial_prompt
-            
-        return config
+    def use_oauth2(self) -> bool:
+        """Zkontroluje, zda máme OAuth2 credentials"""
+        return all([
+            self.sharepoint_client_id,
+            self.sharepoint_client_secret,
+            self.sharepoint_tenant_id
+        ])
+        
+    def __post_init__(self):
+        """Zajistí vytvoření potřebných adresářů"""
+        self.temp_download_path.mkdir(parents=True, exist_ok=True)
+        self.local_download_path.mkdir(parents=True, exist_ok=True)
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
 
-# Global settings instance
+# Globální instance nastavení
 settings = Settings()

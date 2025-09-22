@@ -3,7 +3,7 @@ Konfigurace pro Spinoco Whisper Transcriber
 """
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     whisper_device: str = "auto"  # auto, cpu, cuda
     
     # File paths
-    input_folder: Path = Path("../downloaded_recordings")
+    input_folder: Path = Path("../data/01_recordings")
     output_folder: Path = Path("./data/transcriptions")
     processed_folder: Path = Path("./data/processed")
     

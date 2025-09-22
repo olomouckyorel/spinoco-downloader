@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.config import settings
-from src.logger import setup_logging
+from src.logger import setup_logger
 from src.spinoco_client import SpinocoClient
 from src.sharepoint_client import SharePointClient
 
@@ -135,7 +135,7 @@ async def main():
     print("=" * 60)
     
     # Setup logging
-    logger = setup_logging(log_level="INFO", enable_colors=True)
+    logger = setup_logger()
     
     # Test konfigurace
     config_ok = await test_configuration()

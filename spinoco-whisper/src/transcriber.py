@@ -104,11 +104,12 @@ class TranscriberModule:
             # Whisper transcription s high-quality nastavením
             result = self.model.transcribe(
                 str(audio_path),
-                language=settings.whisper_language,
+                language="cs",  # Explicitní český kód
                 temperature=settings.whisper_temperature,
                 best_of=settings.whisper_best_of,
                 beam_size=settings.whisper_beam_size,
                 condition_on_previous_text=settings.condition_on_previous_text,
+                initial_prompt="Toto je nahrávka technické podpory v češtině. Obsahuje konverzaci o kotlích, topení a technických problémech.",
                 verbose=False
             )
             

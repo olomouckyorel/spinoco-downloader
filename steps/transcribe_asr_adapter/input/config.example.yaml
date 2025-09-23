@@ -1,0 +1,26 @@
+# Konfigurace pro steps/02_transcribe_asr_adapter
+# Kopíruj do config.yaml a uprav podle potřeby
+
+asr:
+  provider: "existing"                # explicitně
+  mode: "run"                        # 'run' = spouštět tvůj skript, 'import' = jen načíst existující JSONy
+  run_cmd: "python ../spinoco-whisper/main.py --input {audio} --output {out_dir}"
+  outputs_glob: "**/*_transcription.json"   # pro 'import' nebo když tvůj skript sám ukládá JSON
+  language: "cs"                      # čistě informativní; do manifestu
+
+io:
+  input_run_root: "../ingest_spinoco/output/runs"
+  max_parallel: 2
+
+retry:
+  max_retry: 2
+  delay_seconds: 5
+
+logging:
+  level: "INFO"
+  format: "json"
+
+output:
+  # Relativní cesty k output/runs/<STEP_RUN_ID>/data/
+  transcripts_recordings: "transcripts_recordings.jsonl"
+  transcripts_calls: "transcripts_calls.jsonl"

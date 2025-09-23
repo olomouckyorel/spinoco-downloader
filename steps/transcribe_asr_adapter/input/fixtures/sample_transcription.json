@@ -1,0 +1,44 @@
+{
+  "transcription": {
+    "text": "Testovací přepis hovoru o technické podpoře. Obsahuje konverzaci o kotlích a topení.",
+    "language": "cs",
+    "segments": [
+      {
+        "id": 0,
+        "seek": 0,
+        "start": 0.0,
+        "end": 5.2,
+        "text": " Testovací přepis hovoru",
+        "tokens": [50365, 1234, 5678, 9012],
+        "temperature": 0.0,
+        "avg_logprob": -0.3,
+        "compression_ratio": 0.8,
+        "no_speech_prob": 0.1
+      },
+      {
+        "id": 1,
+        "seek": 5000,
+        "start": 5.2,
+        "end": 10.5,
+        "text": " o technické podpoře.",
+        "tokens": [50365, 3456, 7890, 1234],
+        "temperature": 0.0,
+        "avg_logprob": -0.25,
+        "compression_ratio": 0.75,
+        "no_speech_prob": 0.05
+      }
+    ]
+  },
+  "metadata": {
+    "filename": "test_recording.ogg",
+    "duration": 10.5,
+    "whisper_model": "large-v3",
+    "device_used": "cpu",
+    "beam_size": 5,
+    "best_of": 5,
+    "temperature": 0.0,
+    "language": "cs",
+    "initial_prompt": "Toto je nahrávka technické podpory v češtině.",
+    "processed_at": "2024-08-22T05:43:36Z"
+  }
+}

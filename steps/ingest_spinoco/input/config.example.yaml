@@ -1,0 +1,29 @@
+# Konfigurace pro steps/01_ingest_spinoco
+# Kopíruj do config.yaml a uprav podle potřeby
+
+auth:
+  api_base_url: "https://api.spinoco.com"
+  token: "YOUR_SPINOCO_API_TOKEN"
+
+fetch:
+  page_size: 100
+  since: null  # ISO timestamp pro backfill, null pro incr
+
+retry:
+  max_retry: 3
+  delay_seconds: 5
+
+download:
+  concurrency: 3
+  validate_ogg_header: true  # kontrola "OggS" na začátku souboru
+  temp_suffix: ".partial"   # přípona pro dočasné soubory
+
+logging:
+  level: "INFO"
+  format: "json"  # nebo "text"
+
+output:
+  # Relativní cesty k output/runs/<STEP_RUN_ID>/data/
+  metadata_calls: "metadata_call_tasks.jsonl"
+  metadata_recordings: "metadata_recordings.jsonl"
+  audio_dir: "audio/"

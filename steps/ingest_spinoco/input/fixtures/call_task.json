@@ -1,0 +1,22 @@
+{
+  "id": "71da9579-7730-11ee-9300-a3a8e273fd52",
+  "lastUpdate": 1724305416000,
+  "tpe": {
+    "name": "Technická podpora",
+    "id": "tech_support"
+  },
+  "result": null,
+  "detail": {
+    "customer": "Test Customer",
+    "issue": "Problém s kotlem"
+  },
+  "hashTags": [],
+  "owner": {
+    "id": "user123",
+    "name": "Jan Novák"
+  },
+  "assignee": {
+    "id": "agent456",
+    "name": "Agent Smith"
+  }
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "recording_001",
+    "date": 1724305416000,
+    "duration": 229,
+    "vm": false,
+    "available": true,
+    "transcriptions": {}
+  },
+  {
+    "id": "recording_002", 
+    "date": 1724305417000,
+    "duration": 180,
+    "vm": false,
+    "available": true,
+    "transcriptions": {}
+  }
+]

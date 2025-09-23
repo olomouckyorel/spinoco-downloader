@@ -1,0 +1,29 @@
+# Konfigurace pro steps/03_anonymize
+# Kopíruj do config.yaml a uprav podle potřeby
+
+anonymize:
+  tags_prefix: "@"
+  redact_phone: true
+  redact_email: true
+  redact_iban: true
+  redact_address: false          # začneme hard PII; adresy přidáme později
+  keep_call_id: true             # call_id/recording_id NEMAŽEME (nejsou PII)
+  make_vault_map: true           # uložit lokální mapu náhrad (salted hash)
+
+io:
+  input_run_root: "../transcribe_asr_adapter/output/runs"
+  max_parallel: 2
+
+retry:
+  max_retry: 2
+  delay_seconds: 5
+
+logging:
+  level: "INFO"
+  format: "json"
+
+output:
+  # Relativní cesty k output/runs/<STEP_RUN_ID>/data/
+  transcripts_recordings_redacted: "transcripts_recordings_redacted.jsonl"
+  transcripts_calls_redacted: "transcripts_calls_redacted.jsonl"
+  vault_map_dir: "vault_map"

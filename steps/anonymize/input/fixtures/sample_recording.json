@@ -1,0 +1,48 @@
+{
+  "call_id": "20240822_054336_71da9579",
+  "recording_id": "20240822_054336_71da9579_p01",
+  "duration_s": 229.0,
+  "lang": "cs",
+  "asr": {
+    "provider": "existing",
+    "model": "large-v3",
+    "device": "cpu",
+    "settings": {
+      "beam_size": 5,
+      "best_of": 5,
+      "temperature": 0.0,
+      "language": "cs"
+    }
+  },
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 5.2,
+      "text": "Dobrý den, volám vám z čísla +420 123 456 789"
+    },
+    {
+      "start": 5.2,
+      "end": 10.5,
+      "text": "Můj email je jan.novak@example.com a IBAN je CZ65 0800 0000 1920 0014 5399"
+    },
+    {
+      "start": 10.5,
+      "end": 15.8,
+      "text": "Můžete mi zavolat na 777 888 999 nebo napsat na info@firma.cz"
+    }
+  ],
+  "text": "Dobrý den, volám vám z čísla +420 123 456 789. Můj email je jan.novak@example.com a IBAN je CZ65 0800 0000 1920 0014 5399. Můžete mi zavolat na 777 888 999 nebo napsat na info@firma.cz",
+  "metrics": {
+    "seg_count": 3,
+    "avg_seg_len_s": 5.2
+  },
+  "source": {
+    "audio_path": "audio/20240822_054336_71da9579_p01.ogg",
+    "transcript_source": "existing-json"
+  },
+  "processing": {
+    "asr_settings_hash": "abc123",
+    "transcript_hash": "def456",
+    "processed_at_utc": "2024-08-22T05:43:36Z"
+  }
+}

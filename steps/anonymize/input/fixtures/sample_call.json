@@ -1,0 +1,57 @@
+{
+  "call_id": "20240822_054336_71da9579",
+  "duration_s": 458.0,
+  "lang": "cs",
+  "asr": {
+    "provider": "existing",
+    "model": "large-v3",
+    "device": "cpu",
+    "settings": {
+      "beam_size": 5,
+      "best_of": 5,
+      "temperature": 0.0,
+      "language": "cs"
+    }
+  },
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 5.2,
+      "text": "Dobrý den, volám vám z čísla +420 123 456 789",
+      "recording_id": "20240822_054336_71da9579_p01"
+    },
+    {
+      "start": 5.2,
+      "end": 10.5,
+      "text": "Můj email je jan.novak@example.com a IBAN je CZ65 0800 0000 1920 0014 5399",
+      "recording_id": "20240822_054336_71da9579_p01"
+    },
+    {
+      "start": 10.5,
+      "end": 15.8,
+      "text": "Můžete mi zavolat na 777 888 999 nebo napsat na info@firma.cz",
+      "recording_id": "20240822_054336_71da9579_p01"
+    },
+    {
+      "start": 15.8,
+      "end": 20.0,
+      "text": "Další telefon je 123456789 a email kontakt@test.cz",
+      "recording_id": "20240822_054336_71da9579_p02"
+    }
+  ],
+  "text": "[--- 20240822_054336_71da9579_p01 ---]\n\nDobrý den, volám vám z čísla +420 123 456 789. Můj email je jan.novak@example.com a IBAN je CZ65 0800 0000 1920 0014 5399. Můžete mi zavolat na 777 888 999 nebo napsat na info@firma.cz\n\n[--- 20240822_054336_71da9579_p02 ---]\n\nDalší telefon je 123456789 a email kontakt@test.cz",
+  "metrics": {
+    "recording_count": 2,
+    "total_segments": 4,
+    "avg_seg_len_s": 5.0
+  },
+  "source": {
+    "recording_ids": ["20240822_054336_71da9579_p01", "20240822_054336_71da9579_p02"],
+    "transcript_source": "existing-json-aggregated"
+  },
+  "processing": {
+    "asr_settings_hash": "abc123",
+    "transcript_hash": "ghi789",
+    "processed_at_utc": "2024-08-22T05:43:36Z"
+  }
+}

@@ -1,0 +1,3 @@
+"""
+Testy pro common library.
+"""

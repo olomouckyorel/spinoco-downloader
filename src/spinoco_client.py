@@ -409,68 +409,6 @@ class SpinocoClient:
             )
             raise
     
-    async def delete_recording(self, task_id: str, recording_id: str) -> bool:
-        """
-        Smaže nahrávku hovoru ze Spinoco podle oficiální API dokumentace.
-        
-        Implementuje DELETE /recording/{task-id}/{recording-id}
-        
-        Args:
-            task_id: ID úkolu
-            recording_id: ID nahrávky
-            
-        Returns:
-            bool: True pokud byla nahrávka úspěšně smazána
-        """
-        url = f"/recording/{task_id}/{recording_id}"
-        
-        self.logger.info(
-            "Mažu nahrávku ze Spinoco",
-            task_id=task_id,
-            recording_id=recording_id
-        )
-        
-        try:
-            response = await self.client.delete(f"{self.base_url}{url}")
-            
-            if response.status_code == 204:
-                # Úspěšně smazáno (No Content)
-                self.logger.info(
-                    "Nahrávka úspěšně smazána ze Spinoco",
-                    task_id=task_id,
-                    recording_id=recording_id
-                )
-                return True
-            elif response.status_code == 404:
-                # Nahrávka už neexistuje
-                self.logger.warning(
-                    "Nahrávka už neexistuje na Spinoco",
-                    task_id=task_id,
-                    recording_id=recording_id
-                )
-                return True  # Považujeme za úspěch
-            else:
-                response.raise_for_status()
-                return True
-                
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP chyba při mazání nahrávky",
-                task_id=task_id,
-                recording_id=recording_id,
-                status_code=e.response.status_code,
-                error=str(e)
-            )
-            return False
-        except Exception as e:
-            self.logger.error(
-                "Chyba při mazání nahrávky",
-                task_id=task_id,
-                recording_id=recording_id,
-                error=str(e)
-            )
-            return False
-    
     async def get_skills_labels(self, include_deactivated: bool = False) -> Dict[str, str]:
         """Získá mapování skill ID -> label."""
         url = f"/skill/labels?deactivated={str(include_deactivated).lower()}"

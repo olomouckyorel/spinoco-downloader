@@ -8,7 +8,7 @@ Workflow:
 1. Stáhni všechny dokončené hovory s nahrávkami
 2. Stáhni nahrávky (.ogg) na SharePoint do složek podle měsíce  
 3. Zkontroluj velikosti souborů
-4. Smaž úspěšně stažené nahrávky ze Spinoco
+4. Data zůstávají na Spinocu (nejsou mazána)
 5. Zaloguj výsledky a ukonči se
 """
 
@@ -45,7 +45,6 @@ class SpinocoRecordingDownloader:
             "calls_found": 0,
             "recordings_found": 0,
             "recordings_downloaded": 0,
-            "recordings_deleted": 0,
             "errors": 0,
             "start_time": datetime.now()
         }
@@ -105,7 +104,7 @@ class SpinocoRecordingDownloader:
         1. Získej všechny dokončené hovory s nahrávkami
         2. Stáhni všechny nahrávky na SharePoint
         3. Zkontroluj velikosti
-        4. Smaž úspěšné ze Spinoco
+        4. Data zůstávají na Spinocu (nejsou mazána)
         """
         self.logger.info("📞 Získávám všechny dokončené hovory s nahrávkami")
         
@@ -161,8 +160,7 @@ class SpinocoRecordingDownloader:
         self.logger.info(f"⬇️ Stahuji {len(download_tasks)} nahrávek paralelně")
         download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
         
-        # Krok 3: Zpracuj výsledky a smaž úspěšné ze Spinoco
-        successful_deletions = []
+        # Krok 3: Zpracuj výsledky
         for i, result in enumerate(download_results):
             if isinstance(result, Exception):
                 self.logger.error(f"❌ Chyba při stahování: {result}")
@@ -171,20 +169,10 @@ class SpinocoRecordingDownloader:
                 call, recording, success = result
                 if success:
                     self.stats["recordings_downloaded"] += 1
-                    successful_deletions.append((call, recording))
                 else:
                     self.stats["errors"] += 1
         
-        # Krok 4: Smaž úspěšně stažené nahrávky ze Spinoco (jen v produkci)
-        if successful_deletions and not settings.test_mode:
-            self.logger.info(f"🗑️ Mažu {len(successful_deletions)} nahrávek ze Spinoco")
-            await self.delete_recordings_from_spinoco(
-                successful_deletions, spinoco_client
-            )
-        elif settings.test_mode:
-            self.logger.info(f"🧪 Test režim - NEMAZÁM ze Spinoco ({len(successful_deletions)} nahrávek)")
-        
-        self.logger.info("✅ Batch processing dokončen")
+        self.logger.info("✅ Batch processing dokončen - data zůstávají na Spinocu")
     
     async def download_single_recording(
         self,
@@ -324,40 +312,6 @@ class SpinocoRecordingDownloader:
         except Exception:
             return "unknown"
     
-    async def delete_recordings_from_spinoco(
-        self,
-        successful_deletions: List[tuple[CallTask, CallRecording]],
-        spinoco_client: SpinocoClient
-    ):
-        """Smaže úspěšně stažené nahrávky ze Spinoco."""
-        
-        delete_tasks = []
-        for call, recording in successful_deletions:
-            delete_task = spinoco_client.delete_recording(call.id, recording.id)
-            delete_tasks.append(delete_task)
-        
-        # Smaž paralelně
-        delete_results = await asyncio.gather(*delete_tasks, return_exceptions=True)
-        
-        # Zpracuj výsledky
-        for i, result in enumerate(delete_results):
-            call, recording = successful_deletions[i]
-            if isinstance(result, Exception):
-                self.logger.error(
-                    f"❌ Nepodařilo se smazat nahrávku ze Spinoco",
-                    call_id=call.id,
-                    recording_id=recording.id,
-                    error=str(result)
-                )
-                self.stats["errors"] += 1
-            else:
-                self.stats["recordings_deleted"] += 1
-                self.logger.debug(
-                    f"🗑️ Nahrávka smazána ze Spinoco",
-                    call_id=call.id,
-                    recording_id=recording.id
-                )
-    
     def generate_filename_from_metadata(self, call: CallTask, recording: CallRecording) -> str:
         """
         Vygeneruje název souboru z metadat hovoru.
@@ -442,7 +396,6 @@ class SpinocoRecordingDownloader:
             calls_found=self.stats["calls_found"],
             recordings_found=self.stats["recordings_found"],
             recordings_downloaded=self.stats["recordings_downloaded"],
-            recordings_deleted=self.stats["recordings_deleted"],
             errors=self.stats["errors"]
         )
         

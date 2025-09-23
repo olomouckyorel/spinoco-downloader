@@ -14,6 +14,8 @@ from .metadata import (
 
 from .state import State
 
+from .manifest import Manifest, create_manifest
+
 __all__ = [
     # IDs
     'new_ulid', 'new_run_id', 'call_id_from_spinoco', 'make_recording_ids',
@@ -22,5 +24,7 @@ __all__ = [
     'utc_iso_from_ms', 'normalize_call_task', 'build_recordings_metadata',
     'spinoco_to_internal', 'validate_call_task', 'validate_recording',
     # State
-    'State'
+    'State',
+    # Manifest
+    'Manifest', 'create_manifest'
 ]

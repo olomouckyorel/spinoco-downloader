@@ -13,9 +13,17 @@ import argparse
 import json
 import subprocess
 import sys
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 import time
+
+# Použijeme python z aktuálního venv
+REPO = Path(__file__).resolve().parents[1]
+PY = sys.executable  # ← tohle je python z aktuálního venv!
+
+INGEST = REPO / "steps" / "ingest_spinoco" / "run.py"
+TRANS = REPO / "steps" / "transcribe_asr_adapter" / "run.py"
 
 
 class Colors:
@@ -59,19 +67,24 @@ def check_config_exists(config_path: Path) -> bool:
     return True
 
 
-def run_step(title: str, cmd: list[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+def run_step(title: str, args: list[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
     """
     Spustí krok pipeline a vrátí výsledek.
     
     Args:
         title: Název kroku pro výpis
-        cmd: Příkaz k spuštění
+        args: Argumenty pro python script (bez 'python')
         cwd: Pracovní adresář
         
     Returns:
         CompletedProcess: Výsledek spuštění
     """
     print_step(title, "RUNNING")
+    
+    # Použijeme python z venv a zdědíme environment
+    env = os.environ.copy()  # zdědí VIRTUAL_ENV, PATH, atd.
+    cmd = [PY] + [str(a) for a in args]  # ← spouštíme přes venv python
+    
     print_colored(f"Příkaz: {' '.join(cmd)}", Colors.BLUE)
     
     start_time = time.time()
@@ -79,7 +92,8 @@ def run_step(title: str, cmd: list[str], cwd: Optional[Path] = None) -> subproce
     try:
         result = subprocess.run(
             cmd,
-            cwd=cwd,
+            cwd=str(cwd or REPO),
+            env=env,
             capture_output=True,
             text=True,
             check=False
@@ -212,15 +226,15 @@ def main():
     # Krok 1: Ingest
     print_header("KROK 1: INGEST SPINOCO")
     
-    ingest_cmd = [
-        "python", "run.py",
-        "--mode", "incr",
+    ingest_args = [
+        INGEST,
+        "--mode", "backfill",
         "--limit", str(args.limit),
         "--max-retry", "2",
-        "--config", "input/config.yaml"
+        "--config", REPO / "steps/ingest_spinoco/input/config.yaml"
     ]
     
-    ingest_result = run_step("INGEST", ingest_cmd, cwd=Path("steps/ingest_spinoco"))
+    ingest_result = run_step("INGEST", ingest_args)
     
     if ingest_result.returncode != 0:
         print_colored("❌ Ingest selhal - ukončuji", Colors.RED, bold=True)
@@ -249,16 +263,16 @@ def main():
     # Krok 2: Transcribe
     print_header("KROK 2: TRANSCRIBE ASR ADAPTER")
     
-    transcribe_cmd = [
-        "python", "run.py",
+    transcribe_args = [
+        TRANS,
         "--mode", "incr",
         "--input-run", ingest_run.name,
         "--limit", str(args.limit),
         "--max-retry", "2",
-        "--config", "input/config.yaml"
+        "--config", REPO / "steps/transcribe_asr_adapter/input/config.yaml"
     ]
     
-    transcribe_result = run_step("TRANSCRIBE", transcribe_cmd, cwd=Path("steps/transcribe_asr_adapter"))
+    transcribe_result = run_step("TRANSCRIBE", transcribe_args)
     
     # Najdi nejnovější transcribe run
     print_header("HLEDÁNÍ NEJNOVĚJŠÍHO TRANSCRIBE RUN")

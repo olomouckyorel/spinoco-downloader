@@ -1,0 +1,5 @@
+{
+  "error": "'<' not supported between instances of 'int' and 'str'",
+  "type": "TypeError",
+  "step_run_id": "01K5TWGRDG860S5ADCEY73M05X"
+}

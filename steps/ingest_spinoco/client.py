@@ -6,42 +6,34 @@ Obsahuje jak reálný SpinocoClient tak FakeSpinocoClient pro testy.
 
 import json
 import time
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Iterator
 from datetime import datetime, timezone
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import httpx
+
+# Import původního SpinocoClient
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+from src.spinoco_client import SpinocoClient as OriginalSpinocoClient
 
 
 class SpinocoClient:
-    """Reálný Spinoco API client."""
+    """Použije původní SpinocoClient přímo."""
     
     def __init__(self, api_base_url: str, token: str, page_size: int = 100):
         self.api_base_url = api_base_url.rstrip('/')
         self.token = token
         self.page_size = page_size
         
-        # Nastav HTTP session s retry
-        self.session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
+        # Použijeme původní SpinocoClient přímo
+        self.client = OriginalSpinocoClient(
+            api_token=token,
+            base_url=api_base_url
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
-        
-        # Auth header
-        self.session.headers.update({
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        })
     
     def list_calls(self, since: Optional[str] = None, limit: Optional[int] = None) -> Iterator[Dict[str, Any]]:
         """
-        Načte seznam hovorů ze Spinoco API.
+        Načte seznam hovorů pomocí původního SpinocoClient (sync wrapper).
         
         Args:
             since: ISO timestamp pro filtrování (volitelné)
@@ -50,62 +42,101 @@ class SpinocoClient:
         Yields:
             Dict: CallTask data
         """
-        page = 0
-        count = 0
+        import asyncio
         
-        while True:
-            params = {
-                'page': page,
-                'size': self.page_size
-            }
+        async def _async_list_calls():
+            count = 0
             
-            if since:
-                params['since'] = since
-            
-            try:
-                response = self.session.get(f"{self.api_base_url}/calls", params=params)
-                response.raise_for_status()
-                
-                data = response.json()
-                calls = data.get('data', [])
-                
-                if not calls:
+            async for call_task in self.original_client.get_completed_calls_with_recordings():
+                if limit and count >= limit:
                     break
+                    
+                # Konvertuj CallTask na dict
+                task_dict = {
+                    'id': call_task.id,
+                    'lastUpdate': call_task.lastUpdate,
+                    'tpe': call_task.tpe,
+                    'result': call_task.result,
+                    'detail': call_task.detail,
+                    'hashTags': call_task.hashTags,
+                    'owner': call_task.owner,
+                    'assignee': call_task.assignee
+                }
                 
-                for call in calls:
-                    if limit and count >= limit:
-                        return
-                    yield call
-                    count += 1
+                # Debug: vypiš první task
+                if count == 0:
+                    print(f"První task: {task_dict.get('id')}, detail: {task_dict.get('detail', {}).get('__tpe')}")
                 
-                page += 1
+                # Filtruj podle 'since' pokud je zadáno
+                if since:
+                    from datetime import datetime
+                    since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                    since_ms = int(since_dt.timestamp() * 1000)
+                    if task_dict.get('lastUpdate', 0) < since_ms:
+                        continue
                 
-            except requests.RequestException as e:
-                raise RuntimeError(f"Chyba při načítání hovorů: {e}")
+                yield task_dict
+                count += 1
+        
+        # Spusť async funkci a vrať výsledky
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        try:
+            async_gen = _async_list_calls()
+            while True:
+                try:
+                    task_dict = loop.run_until_complete(async_gen.__anext__())
+                    yield task_dict
+                except StopAsyncIteration:
+                    break
+        finally:
+            if loop.is_running():
+                loop.close()
     
-    def list_recordings(self, call_guid: str) -> List[Dict[str, Any]]:
+    def get_task_detail(self, task_id: str) -> Dict[str, Any]:
         """
-        Načte nahrávky pro konkrétní hovor.
+        Načte detail informace pro konkrétní task podle dokumentace.
         
         Args:
-            call_guid: GUID hovoru
+            task_id: ID tasku
+            
+        Returns:
+            Dict: Detail informace tasku
+        """
+        try:
+            response = self.client.get(f"{self.api_base_url}/task/{task_id}")
+            response.raise_for_status()
+            return response.json()
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Chyba při načítání detailu tasku {task_id}: {e}")
+    
+    def list_recordings(self, call_task: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Extrahuje nahrávky z CallTask objektu pomocí původního clientu.
+        
+        Args:
+            call_task: CallTask data ze Spinoco API
             
         Returns:
             List[Dict]: Seznam nahrávek
         """
-        try:
-            response = self.session.get(f"{self.api_base_url}/calls/{call_guid}/recordings")
-            response.raise_for_status()
-            
-            data = response.json()
-            return data.get('data', [])
-            
-        except requests.RequestException as e:
-            raise RuntimeError(f"Chyba při načítání nahrávek pro hovor {call_guid}: {e}")
+        # Konvertuj dict zpět na CallTask objekt
+        from src.spinoco_client import CallTask
+        task_obj = CallTask(**call_task)
+        
+        # Použij původní metodu
+        recordings = self.original_client.extract_available_recordings(task_obj)
+        
+        # Konvertuj zpět na dict
+        return [recording.dict() for recording in recordings]
     
     def download_recording(self, recording_id: str, output_path: Path) -> int:
         """
-        Stáhne nahrávku do souboru.
+        Stáhne nahrávku do souboru pomocí původního clientu (sync wrapper).
         
         Args:
             recording_id: ID nahrávky
@@ -114,20 +145,27 @@ class SpinocoClient:
         Returns:
             int: Velikost staženého souboru v bajtech
         """
+        import asyncio
+        
+        async def _async_download():
+            audio_data = await self.original_client.download_recording(recording_id)
+            with open(output_path, "wb") as f:
+                f.write(audio_data)
+            return len(audio_data)
+        
         try:
-            response = self.session.get(f"{self.api_base_url}/recordings/{recording_id}/download", stream=True)
-            response.raise_for_status()
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             
-            total_size = 0
-            with open(output_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        total_size += len(chunk)
-            
-            return total_size
-            
-        except requests.RequestException as e:
+            try:
+                return loop.run_until_complete(_async_download())
+            finally:
+                if loop.is_running():
+                    loop.close()
+        except Exception as e:
             raise RuntimeError(f"Chyba při stahování nahrávky {recording_id}: {e}")
 
 

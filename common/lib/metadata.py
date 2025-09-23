@@ -99,12 +99,33 @@ def build_recordings_metadata(call_doc: Dict[str, Any], recordings: Iterable[Dic
     call_id = call_doc['call_id']
     call_guid = call_doc.get('spinoco_call_guid', '')
     
-    # Filtruj nahrávky s validním date
+    # Filtruj nahrávky s validním date (nebo použij call_id timestamp)
     valid_recordings = []
     for recording in recordings:
+        print(f"    Recording {recording.get('id')}: date={recording.get('date')}, available={recording.get('available')}")
+        
+        # Pokud chybí date, použij call_id timestamp
+        if recording.get('date') is None:
+            # Extrahuj timestamp z call_id (formát: YYYYMMDD_HHMMSS_guid)
+            call_id_parts = call_id.split('_')
+            if len(call_id_parts) >= 2:
+                try:
+                    # Konvertuj YYYYMMDD_HHMMSS na epoch ms
+                    date_str = call_id_parts[0] + call_id_parts[1]  # YYYYMMDDHHMMSS
+                    from datetime import datetime
+                    dt = datetime.strptime(date_str, '%Y%m%d%H%M%S')
+                    recording['date'] = int(dt.timestamp() * 1000)
+                    print(f"    Using call_id timestamp for recording {recording.get('id')}: {recording['date']}")
+                except ValueError:
+                    print(f"    SKIPPING recording {recording.get('id')} - cannot parse call_id timestamp")
+                    continue
+        
         if recording.get('date') is not None and recording['date'] >= 0:
             valid_recordings.append(recording)
+        else:
+            print(f"    SKIPPING recording {recording.get('id')} - invalid date")
     
+    print(f"    Valid recordings: {len(valid_recordings)}")
     if not valid_recordings:
         return []
     

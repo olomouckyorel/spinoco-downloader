@@ -24,7 +24,59 @@ from common.lib import (
     State, Manifest, create_manifest
 )
 
-from .client import SpinocoClient, FakeSpinocoClient
+from client import SpinocoClient, FakeSpinocoClient
+
+
+def now_utc_iso() -> str:
+    """Vrátí aktuální UTC čas ve formátu ISO."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat() + "Z"
+
+
+def fetch_calls_and_recordings(client, since: Optional[str] = None, limit: Optional[int] = None):
+    """
+    Načte hovory a nahrávky v main threadu pomocí asyncio.run().
+    Vrátí hotové Python struktury (žádný async generator).
+    """
+    import asyncio
+    
+    async def _run():
+        calls = []
+        recordings_by_call = {}
+        
+        # Načti hovory
+        async for call_task in client.client.get_completed_calls_with_recordings():
+            if limit and len(calls) >= limit:
+                break
+                
+            # Konvertuj CallTask na dict
+            task_dict = {
+                'id': call_task.id,
+                'lastUpdate': call_task.lastUpdate,
+                'tpe': call_task.tpe,
+                'result': call_task.result,
+                'detail': call_task.detail,
+                'hashTags': call_task.hashTags,
+                'owner': call_task.owner,
+                'assignee': call_task.assignee
+            }
+            
+            # Filtruj podle 'since' pokud je zadáno
+            if since:
+                from datetime import datetime
+                since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                since_ms = int(since_dt.timestamp() * 1000)
+                if task_dict.get('lastUpdate', 0) < since_ms:
+                    continue
+            
+            calls.append(task_dict)
+            
+            # Načti nahrávky pro tento hovor
+            recordings = client.client.extract_available_recordings(call_task)
+            recordings_by_call[call_task.id] = [recording.dict() for recording in recordings]
+        
+        return calls, recordings_by_call
+    
+    return asyncio.run(_run())
 
 
 class IngestRunner:
@@ -109,11 +161,16 @@ class IngestRunner:
             return False
     
     def fetch_calls(self, since: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Načte hovory ze Spinoco API."""
+        """Načte hovory ze Spinoco API pomocí async fetch v main threadu."""
         self._update_progress("fetch_calls", 0.0, "Načítám hovory ze Spinoco API...")
         
+        # Použij async fetch v main threadu
+        calls_data, recordings_by_call = fetch_calls_and_recordings(self.client, since, limit)
+        
         calls = []
-        for call_task in self.client.list_calls(since=since, limit=limit):
+        for call_task in calls_data:
+            print(f"Načten hovor: {call_task['id']} (lastUpdate: {call_task['lastUpdate']})")
+            
             # Normalizuj call task
             normalized_call = normalize_call_task(call_task)
             
@@ -127,24 +184,32 @@ class IngestRunner:
             
             calls.append({
                 'call_task': call_task,
-                'normalized_call': normalized_call
+                'normalized_call': normalized_call,
+                'recordings': recordings_by_call.get(call_task['id'], [])
             })
+        
+        print(f"Celkem načteno {len(calls)} hovorů ze Spinoco API")
         
         self._update_progress("fetch_calls", 100.0, f"Načteno {len(calls)} hovorů")
         return calls
     
     def fetch_recordings(self, calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Načte metadata nahrávek pro všechny hovory."""
-        self._update_progress("fetch_recordings", 0.0, "Načítám metadata nahrávek...")
+        """Zpracuje metadata nahrávek pro všechny hovory (už načtené v fetch_calls)."""
+        self._update_progress("fetch_recordings", 0.0, "Zpracovávám metadata nahrávek...")
         
         all_recordings = []
         
         for i, call_data in enumerate(calls):
             call_task = call_data['call_task']
             normalized_call = call_data['normalized_call']
+            recordings = call_data.get('recordings', [])
             
-            # Načti nahrávky pro tento hovor
-            recordings = self.client.list_recordings(call_task['id'])
+            print(f"Hovor {call_task['id']}: nalezeno {len(recordings)} nahrávek")
+            
+            # Debug: vypiš strukturu detail
+            detail = call_task.get('detail', {})
+            print(f"  Detail __tpe: {detail.get('__tpe')}")
+            print(f"  Recordings keys: {list(detail.get('recordings', {}).keys())}")
             
             # Normalizuj nahrávky
             normalized_recordings = build_recordings_metadata(normalized_call, recordings)
@@ -185,8 +250,11 @@ class IngestRunner:
             'total_bytes': 0
         }
         
-        def download_single(recording_id: str) -> Dict[str, Any]:
-            """Stáhne jednu nahrávku."""
+        def _download_worker(recording_id: str) -> tuple:
+            """
+            Worker funkce - jen stahuje OGG a vrací výsledek (bez DB operací).
+            Vrací: (status, recording_id, size_bytes, etag, error)
+            """
             temp_path = self.audio_dir / f"{recording_id}{self.config['download']['temp_suffix']}"
             final_path = self.audio_dir / f"{recording_id}.ogg"
             
@@ -197,69 +265,75 @@ class IngestRunner:
                 # Validuj OGG
                 if not self._validate_ogg_file(temp_path):
                     temp_path.unlink(missing_ok=True)
-                    return {
-                        'recording_id': recording_id,
-                        'success': False,
-                        'error': 'invalid_ogg_header',
-                        'size_bytes': 0
-                    }
+                    return ("fail", recording_id, None, None, "invalid_ogg_header")
                 
                 # Přesuň na finální název
                 temp_path.rename(final_path)
                 
-                # Aktualizuj state
-                self.state.mark_downloaded(
-                    spinoco_recording_id=recording_id,
-                    size_bytes=size_bytes,
-                    content_etag=None,
-                    processed_at_utc=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-                )
-                
-                return {
-                    'recording_id': recording_id,
-                    'success': True,
-                    'error': None,
-                    'size_bytes': size_bytes
-                }
+                return ("ok", recording_id, size_bytes, None, None)
                 
             except Exception as e:
                 temp_path.unlink(missing_ok=True)
-                
-                # Aktualizuj state s chybou
-                self.state.mark_failed_transient(
-                    spinoco_recording_id=recording_id,
-                    error_key=f"download_error: {type(e).__name__}",
-                    failed_at_utc=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-                )
-                
-                return {
-                    'recording_id': recording_id,
-                    'success': False,
-                    'error': str(e),
-                    'size_bytes': 0
-                }
+                return ("fail", recording_id, None, None, f"{type(e).__name__}:{e}")
         
         # Paralelní stahování
         concurrency = self.config['download']['concurrency']
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
             future_to_recording = {
-                executor.submit(download_single, recording_id): recording_id 
+                executor.submit(_download_worker, recording_id): recording_id 
                 for recording_id in recording_ids
             }
             
             completed = 0
+            ok = 0
+            failed = 0
+            
             for future in concurrent.futures.as_completed(future_to_recording):
-                result = future.result()
+                status, rec_id, size_bytes, etag, error = future.result()
                 
-                if result['success']:
-                    results['downloaded'].append(result)
-                    results['total_bytes'] += result['size_bytes']
+                if status == "ok":
+                    # DB operace v main threadu
+                    self.state.mark_downloaded(
+                        spinoco_recording_id=rec_id,
+                        size_bytes=size_bytes,
+                        content_etag=etag,
+                        processed_at_utc=now_utc_iso()
+                    )
+                    
+                    results['downloaded'].append({
+                        'recording_id': rec_id,
+                        'success': True,
+                        'error': None,
+                        'size_bytes': size_bytes
+                    })
+                    results['total_bytes'] += size_bytes
+                    ok += 1
                 else:
-                    results['failed'].append(result)
+                    # DB operace v main threadu
+                    retry_count = self.state.mark_failed_transient(
+                        spinoco_recording_id=rec_id,
+                        error_key=f"download_error: {error}",
+                        failed_at_utc=now_utc_iso()
+                    )
+                    
+                    if retry_count >= self.config['retry']['max_retry']:
+                        self.state.mark_failed_permanent(
+                            spinoco_recording_id=rec_id,
+                            error_key="max_retry_exceeded",
+                            failed_at_utc=now_utc_iso()
+                        )
+                    
+                    results['failed'].append({
+                        'recording_id': rec_id,
+                        'success': False,
+                        'error': error,
+                        'size_bytes': 0
+                    })
+                    failed += 1
                 
                 completed += 1
                 pct = (completed / len(recording_ids)) * 100
-                self._update_progress("download", pct, f"Staženo {completed}/{len(recording_ids)} nahrávek")
+                self._update_progress("download", pct, f"Staženo {completed}/{len(recording_ids)} nahrávek (OK: {ok}, FAIL: {failed})")
         
         return results
     
@@ -416,7 +490,7 @@ class IngestRunner:
             return 0 if metrics['failed'] == 0 else 1
             
         except Exception as e:
-            print(f"❌ Kritická chyba: {e}")
+            print(f"ERROR: Kritická chyba: {e}")
             
             # Zapiš error.json
             error_data = {

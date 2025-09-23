@@ -1,0 +1,33 @@
+# Konfigurace pro steps/01_ingest_spinoco
+# Kopíruj do config.yaml a uprav podle potřeby
+
+auth:
+  api_base_url: "https://api.spinoco.com"
+  token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE4MzAzMzQzODAsImlwcyI6W10sImNjaWQiOiI3MWRhOTU3OS03NzMwLTExZWUtOTMwMC1hM2E4ZTI3M2ZkNTIiLCJ1aWQiOiJlODkyMGFkMy05NDNlLTExZWUtYmMzOC05N2Q1NGMxNDBkOTciLCJpYXQiOjE3NTgxMDA0NjEsImFwaSI6dHJ1ZX0.hJP3De8IfrEvne1m8pY0SDklusrKqWz_dkHxbl-DnwHeBybwyXou6b4kuubySJqKF1j28iCSrdcbsLhy7VS71JxmVSAfFNzWtePDUvRItLIw7Wa2pAHFKaQxVCyvqSQA9AUtC64roXv6b2BYgHHNYtnZW9KNxzgHeJ332SGx3bLzs5OAtik5SPY-dMlOhFEy-2mZ_05McI_tCmcxm9KLVdMOOZmJO5HZ9Ui_6EiKVnMSsvp2794pka5iBOhk8xG__vRjQOgkIjmA9gR_hwcOLfw-y4lx0X1R7q40I-epwWYTKyMVEme74jR9aXBEj61zEhXcN8jCf2qp7QjaQyBUdg"
+  account_id: "71da9579-7730-11ee-9300-a3a8e273fd52"
+
+fetch:
+  page_size: 100
+  since: null  # ISO timestamp pro backfill, null pro incr
+
+retry:
+  max_retry: 3
+  delay_seconds: 5
+
+download:
+  concurrency: 3
+  validate_ogg_header: true  # kontrola "OggS" na začátku souboru
+  temp_suffix: ".partial"   # přípona pro dočasné soubory
+
+logging:
+  level: "INFO"
+  format: "json"  # nebo "text"
+
+output:
+  # Relativní cesty k output/runs/<STEP_RUN_ID>/data/
+  metadata_calls: "metadata_call_tasks.jsonl"
+  metadata_recordings: "metadata_recordings.jsonl"
+  audio_dir: "audio/"
+
+# Test mode - nastav na false pro skutečný API
+test_mode: false

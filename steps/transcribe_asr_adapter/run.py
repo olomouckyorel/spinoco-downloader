@@ -29,6 +29,11 @@ from common.lib import (
 from .adapter import normalize_recording, normalize_call_level, load_transcript_json, find_transcript_file
 
 
+def now_utc_iso() -> str:
+    """Vrátí aktuální UTC čas ve formátu ISO."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat() + "Z"
+
+
 class TranscribeState:
     """State management pro transkripce."""
     
@@ -263,6 +268,7 @@ class TranscribeRunner:
         
         # Nahraď placeholdery
         cmd = run_cmd.format(
+            python=sys.executable,  # Použij aktuální Python executable
             audio=str(audio_path),
             out_dir=str(output_dir)
         )
@@ -344,58 +350,136 @@ class TranscribeRunner:
             'total_segments': 0
         }
         
-        def process_single(recording: Dict[str, Any]) -> Dict[str, Any]:
-            return self.process_recording(recording, input_run_id)
+        def _transcribe_worker(job: Dict[str, Any]) -> tuple:
+            """
+            Worker funkce - jen ASR a normalizace (bez DB operací).
+            Vrací: (status, recording_id, normalized_transcript, error)
+            """
+            recording_id = job['recording_id']
+            call_id = job['call_id']
+            
+            try:
+                # Najdi audio soubor
+                input_run_root = Path(self.config['io']['input_run_root'])
+                audio_path = input_run_root / input_run_id / "data" / "audio" / f"{recording_id}.ogg"
+                
+                if not audio_path.exists():
+                    return ("fail", recording_id, None, "FileNotFoundError: Audio soubor neexistuje")
+                
+                # Urči výstupní adresář
+                temp_output_dir = self.data_dir / "temp" / recording_id
+                temp_output_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Spusť transcriber nebo načti existující JSON
+                asr_config = self.config['asr']
+                
+                if asr_config['mode'] == 'run':
+                    transcript_path = self.run_transcriber(audio_path, temp_output_dir)
+                elif asr_config['mode'] == 'import':
+                    # Najdi existující JSON
+                    base_path = Path(asr_config.get('import_base_path', '.'))
+                    transcript_path = find_transcript_file(base_path, recording_id, asr_config['outputs_glob'])
+                    if not transcript_path:
+                        return ("fail", recording_id, None, "FileNotFoundError: Nenalezen transcript")
+                else:
+                    return ("fail", recording_id, None, f"ValueError: Neplatný ASR mode: {asr_config['mode']}")
+                
+                # Načti a normalizuj transcript
+                transcript_json = load_transcript_json(transcript_path)
+                audio_rel_path = f"audio/{recording_id}.ogg"
+                normalized_transcript = normalize_recording(transcript_json, recording_id, call_id, audio_rel_path)
+                
+                return ("ok", recording_id, normalized_transcript, None)
+                
+            except Exception as e:
+                return ("fail", recording_id, None, f"{type(e).__name__}:{e}")
         
         # Paralelní zpracování
         max_parallel = self.config['io']['max_parallel']
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel) as executor:
             future_to_recording = {
-                executor.submit(process_single, recording): recording 
+                executor.submit(_transcribe_worker, recording): recording 
                 for recording in recordings
             }
             
             completed = 0
+            ok = 0
+            failed = 0
+            
             for future in concurrent.futures.as_completed(future_to_recording):
-                result = future.result()
+                status, rec_id, normalized_transcript, error = future.result()
                 
-                if result['success']:
-                    results['successful'].append(result)
-                    results['total_segments'] += result['transcript']['metrics']['seg_count']
+                if status == "ok":
+                    # DB operace v main threadu
+                    self.state.mark_transcribed(
+                        recording_id=rec_id,
+                        asr_model=self.config['asr']['provider'],
+                        settings_hash="dummy_hash",  # TODO: implementovat hash
+                        processed_at_utc=now_utc_iso()
+                    )
+                    
+                    results['successful'].append({
+                        'recording_id': rec_id,
+                        'success': True,
+                        'transcript': normalized_transcript,
+                        'error': None
+                    })
+                    results['total_segments'] += normalized_transcript['metrics']['seg_count']
+                    ok += 1
                 else:
-                    results['failed'].append(result)
+                    # DB operace v main threadu
+                    retry_count = self.state.mark_failed_transient(
+                        recording_id=rec_id,
+                        error_key=f"asr_error: {error}",
+                        failed_at_utc=now_utc_iso()
+                    )
+                    
+                    if retry_count >= self.config['retry']['max_retry']:
+                        self.state.mark_failed_permanent(
+                            recording_id=rec_id,
+                            error_key="max_retry_exceeded",
+                            failed_at_utc=now_utc_iso()
+                        )
+                    
+                    results['failed'].append({
+                        'recording_id': rec_id,
+                        'success': False,
+                        'transcript': None,
+                        'error': error
+                    })
+                    failed += 1
                 
                 completed += 1
                 pct = (completed / len(recordings)) * 100
-                self._update_progress("transcription", pct, f"Zpracováno {completed}/{len(recordings)} nahrávek")
+                self._update_progress("transcription", pct, f"Zpracováno {completed}/{len(recordings)} nahrávek (OK: {ok}, FAIL: {failed})")
         
         return results
     
     def write_transcripts(self, results: Dict[str, Any]):
-        """Zapíše transkripty do JSONL souborů."""
+        """Zapíše transkripty do JSONL souborů v main threadu."""
         self._update_progress("output", 0.0, "Zapisuji transkripty...")
+        
+        # Buffer pro call-level agregace
+        call_buffer = {}
         
         # Recording-level transkripty
         recordings_path = self.data_dir / self.config['output']['transcripts_recordings']
         with open(recordings_path, 'w', encoding='utf-8') as f:
             for result in results['successful']:
-                json.dump(result['transcript'], f, ensure_ascii=False)
+                transcript = result['transcript']
+                json.dump(transcript, f, ensure_ascii=False)
                 f.write('\n')
+                
+                # Přidej do bufferu pro call-level agregaci
+                call_id = transcript['call_id']
+                if call_id not in call_buffer:
+                    call_buffer[call_id] = []
+                call_buffer[call_id].append(transcript)
         
-        # Call-level agregace
-        call_transcripts = {}
-        for result in results['successful']:
-            transcript = result['transcript']
-            call_id = transcript['call_id']
-            
-            if call_id not in call_transcripts:
-                call_transcripts[call_id] = []
-            call_transcripts[call_id].append(transcript)
-        
-        # Zapiš call-level transkripty
+        # Call-level agregace z bufferu
         calls_path = self.data_dir / self.config['output']['transcripts_calls']
         with open(calls_path, 'w', encoding='utf-8') as f:
-            for call_id, recordings in call_transcripts.items():
+            for call_id, recordings in call_buffer.items():
                 call_transcript = normalize_call_level(recordings)
                 json.dump(call_transcript, f, ensure_ascii=False)
                 f.write('\n')

@@ -1,0 +1,14 @@
+{
+  "calls_total": 1,
+  "calls_redacted": 1,
+  "calls_failed": 0,
+  "recordings_total": 1,
+  "total_replacements": 0,
+  "pii_counts": {
+    "PHONE": 0,
+    "EMAIL": 0,
+    "IBAN": 0
+  },
+  "runtime_s": 0.013151168823242188,
+  "throughput_calls_per_min": 4562.332124728064
+}

@@ -1,0 +1,44 @@
+{
+  "schema": "bh.v1.transcripts_redacted",
+  "schema_version": "1.0.0",
+  "step_id": "03_anonymize",
+  "step_run_id": "01K6D810CF3ZBQG38MX6YKM310",
+  "flow_run_id": null,
+  "producer": {
+    "git_sha": "ec21a2f",
+    "host": "SERVIS-MCAREK",
+    "user": "MCarek",
+    "processor_version": null
+  },
+  "run_mode": "incr",
+  "started_at_utc": "2025-09-30T12:02:17Z",
+  "finished_at_utc": "2025-09-30T12:02:17Z",
+  "status": "success",
+  "input_refs": [
+    {
+      "type": "call_id",
+      "value": "21951d01-8fb0-11f0-9fcd-0763f6d52bb8"
+    }
+  ],
+  "outputs": {
+    "primary": "transcripts_recordings_redacted.jsonl",
+    "aux": {
+      "call_level": "transcripts_calls_redacted.jsonl"
+    }
+  },
+  "counts": {
+    "calls": 1,
+    "redacted": 1,
+    "failed": 0,
+    "recordings": 1,
+    "replacements": 0
+  },
+  "metrics": {
+    "throughput_calls_per_min": 4562.332124728064,
+    "pii_phone": 0,
+    "pii_email": 0,
+    "pii_iban": 0
+  },
+  "errors": [],
+  "notes": null
+}

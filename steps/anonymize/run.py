@@ -24,7 +24,7 @@ from common.lib import (
     Manifest, create_manifest
 )
 
-from .anonymizer import (
+from anonymizer import (
     redact_recording, redact_call, load_transcript_file, save_transcript_file,
     save_vault_map, get_call_recordings, aggregate_pii_stats
 )
@@ -351,12 +351,12 @@ class AnonymizeRunner:
             # 6. Finalizuj manifest
             self.finalize_manifest(results, metrics)
             
-            print(f"✅ Anonymizace dokončena: {metrics['calls_redacted']} redigováno, {metrics['calls_failed']} chyb")
+            print(f"Anonymizace dokoncena: {metrics['calls_redacted']} redigovano, {metrics['calls_failed']} chyb")
             print(f"   PII náhrady: {metrics['total_replacements']} ({metrics['pii_counts']})")
             return 0 if metrics['calls_failed'] == 0 else 1
             
         except Exception as e:
-            print(f"❌ Kritická chyba: {e}")
+            print(f"CHYBA: Kriticka chyba: {e}")
             
             # Zapiš error.json
             error_data = {

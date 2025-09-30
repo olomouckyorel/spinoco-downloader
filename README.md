@@ -286,14 +286,121 @@ Transcribe RUN_B:
 - **Format**: Numbered `.txt` files with sensitive data removed
 - **Ready for**: Further AI processing, analysis, training
 
-## 🔒 Data Privacy
+## 🔒 Data Privacy & Anonymization
 
-**Anonymization Features:**
-- Phone numbers: `+420123456789` → `@PHONE_001`
-- Email addresses: `user@domain.com` → `@EMAIL_001`
-- IBAN numbers: `CZ123456789` → `@IBAN_001`
-- Call IDs preserved for traceability
-- Vault mapping for reversible anonymization
+### Anonymization Features
+
+**Automatická detekce a nahrazování PII:**
+
+| Typ PII | Příklad | Náhrada | Detekce |
+|---------|---------|---------|---------|
+| Telefon | `+420 777 888 999` | `@PHONE_1` | Regex |
+| Email | `jan.novak@email.cz` | `@EMAIL_1` | Regex |
+| IBAN | `CZ65 0800 0000 1920 0014 5399` | `@IBAN_1` | Regex |
+| Call ID | `21951d01-8fb0-11f0-...` | **ZACHOVÁNO** | - |
+
+### Deterministické tagování
+
+**Per-call consistency:**
+```
+Hovor 1:
+  Telefon +420777888999 → @PHONE_1 (vždy stejný tag)
+  Telefon +420777888999 → @PHONE_1 (druhý výskyt = stejný tag!)
+  Email info@firma.cz   → @EMAIL_1
+  
+Hovor 2:
+  Telefon +420777888999 → @PHONE_1 (nový hovor = znovu @PHONE_1)
+  Email support@firma.cz → @EMAIL_1 (první email = @EMAIL_1)
+```
+
+**Výhody:**
+- ✅ Konzistentní napříč segmenty
+- ✅ Stejné PII = stejný tag
+- ✅ Reprodukovatelné (idempotentní)
+
+### Vault Map - Zpětná identifikace
+
+**Umístění:**
+```
+steps/anonymize/output/runs/<RUN_ID>/data/vault_map/<call_id>.json
+```
+
+**Formát:**
+```json
+{
+  "@PHONE_1": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "@EMAIL_1": "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da",
+  "@IBAN_1": "3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea"
+}
+```
+
+**Co obsahuje:**
+- Tag (např. `@PHONE_1`)
+- **Salted SHA-256 hash** původní hodnoty
+- **NE plaintext!** = Bezpečné pro verzování
+
+### Zpětná identifikace (Audit)
+
+**Když potřebujete zjistit původní hodnotu:**
+
+```python
+# 1. Načíst vault map
+import json
+vault = json.load(open('vault_map/call_id.json'))
+
+# 2. Najít hash pro tag
+hash_value = vault['@PHONE_1']
+# → "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+# 3. Porovnat s kandidáty
+import hashlib
+def check_candidate(value, salt="spinoco-vault-2025"):
+    return hashlib.sha256(f"{salt}:{value}".encode()).hexdigest()
+
+if check_candidate("+420777888999") == hash_value:
+    print("Match! Původní hodnota: +420777888999")
+```
+
+**Bezpečnost:**
+- ✅ Vault map obsahuje **JEN hashe**, ne plaintext
+- ✅ Salted hash = odolný proti rainbow tables
+- ✅ Můžete verzovat vault mapy bez úniku PII
+- ✅ Zpětná identifikace = nutná znalost kandidátní hodnoty
+
+### Audit trail
+
+**Co máte po anonymizaci:**
+
+```
+Anonymizovaný text:
+  "Dobrý den, volám z čísla @PHONE_1, email @EMAIL_1"
+
+Vault map (hashované):
+  @PHONE_1 → e3b0c44...
+  @EMAIL_1 → 38b060a...
+  
+Recording ID:
+  3a243241-8fb0-11f0-9fcd-0763f6d52bb8 (zachováno!)
+```
+
+**Pro audit:**
+1. Máte anonymizovaný text (bezpečný pro AI/training)
+2. Máte vault map (hashovaný, bezpečný pro git)
+3. Máte recording ID (pro spojení s originálem)
+4. Můžete ověřit kandidáty přes vault map hash
+
+**Nemůžete:**
+- ❌ Reverzně dekódovat hash → plaintext
+- ❌ Získat původní hodnoty bez kandidátů
+- ❌ Rainbow table attack (díky salt)
+
+### Privacy compliance
+
+- ✅ **GDPR ready** - PII jsou odstraněna z textů
+- ✅ **Audit capable** - vault map pro ověření
+- ✅ **Traceability** - recording IDs zachovány
+- ✅ **Reversible** - s kandidátními hodnotami
+- ✅ **Secure** - salted hash, ne plaintext
 
 ## 🎯 Technical Details
 

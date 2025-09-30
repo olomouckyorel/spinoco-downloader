@@ -1,5 +1,0 @@
-{
-  "error": "SQLite objects created in a thread can only be used in that same thread. The object was created in thread id 88356 and this is thread id 87740.",
-  "type": "ProgrammingError",
-  "step_run_id": "01K5TZYM6ARYKW2MWZEK4JYX24"
-}

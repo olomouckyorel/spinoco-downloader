@@ -1,5 +1,0 @@
-{
-  "error": "Chyba při načítání nahrávek pro hovor 0b466e17-92be-11ee-a611-8fdd1f95d0be: 404 Client Error: Not Found for url: https://api.spinoco.com/calls/0b466e17-92be-11ee-a611-8fdd1f95d0be/recordings",
-  "type": "RuntimeError",
-  "step_run_id": "01K5TWE9BD542CAXP55KCJ6WY8"
-}

@@ -103,10 +103,12 @@ class SpinocoClient:
         self.logger.info("Získávám dokončené hovory s nahrávkami")
         
         # Request podle oficiální dokumentace
+        # Nastavím from na začátek srpna 2025 (1722470400000 = 2025-08-01T00:00:00Z)
         request_body = {
             "query": {
                 "completed": "Only",
-                "queryBy": "LastUpdate", 
+                "queryBy": "LastUpdate",
+                "from": {"L": "1722470400000"},
                 "taskQueryTypes": ["CallSessionTask"]
             },
             "count": 50

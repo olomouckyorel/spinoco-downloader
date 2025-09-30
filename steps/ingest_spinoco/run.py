@@ -44,7 +44,7 @@ def fetch_calls_and_recordings(client, since: Optional[str] = None, limit: Optio
         recordings_by_call = {}
         
         # Načti hovory
-        async for call_task in client.client.get_completed_calls_with_recordings():
+        async for call_task in client._orig.get_completed_calls_with_recordings():
             if limit and len(calls) >= limit:
                 break
                 
@@ -71,7 +71,7 @@ def fetch_calls_and_recordings(client, since: Optional[str] = None, limit: Optio
             calls.append(task_dict)
             
             # Načti nahrávky pro tento hovor
-            recordings = client.client.extract_available_recordings(call_task)
+            recordings = client._orig.extract_available_recordings(call_task)
             recordings_by_call[call_task.id] = [recording.dict() for recording in recordings]
         
         return calls, recordings_by_call
@@ -240,9 +240,9 @@ class IngestRunner:
         self._update_progress("fetch_recordings", 100.0, f"Načteno {len(all_recordings)} nahrávek")
         return all_recordings
     
-    def download_recordings(self, recording_ids: List[str]) -> Dict[str, Any]:
+    def download_recordings(self, todo_recordings: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Stáhne nahrávky paralelně."""
-        self._update_progress("download", 0.0, f"Stahuji {len(recording_ids)} nahrávek...")
+        self._update_progress("download", 0.0, f"Stahuji {len(todo_recordings)} nahrávek...")
         
         results = {
             'downloaded': [],
@@ -250,17 +250,20 @@ class IngestRunner:
             'total_bytes': 0
         }
         
-        def _download_worker(recording_id: str) -> tuple:
+        def _download_worker(recording_data: Dict[str, Any]) -> tuple:
             """
             Worker funkce - jen stahuje OGG a vrací výsledek (bez DB operací).
             Vrací: (status, recording_id, size_bytes, etag, error)
             """
+            recording_id = recording_data['recording_id']
+            task_id = recording_data['spinoco_call_guid']
+            
             temp_path = self.audio_dir / f"{recording_id}{self.config['download']['temp_suffix']}"
             final_path = self.audio_dir / f"{recording_id}.ogg"
             
             try:
-                # Stáhni do temp souboru
-                size_bytes = self.client.download_recording(recording_id, temp_path)
+                # Stáhni do temp souboru s task_id
+                size_bytes = self.client.download_recording(recording_id, temp_path, task_id)
                 
                 # Validuj OGG
                 if not self._validate_ogg_file(temp_path):
@@ -280,8 +283,8 @@ class IngestRunner:
         concurrency = self.config['download']['concurrency']
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
             future_to_recording = {
-                executor.submit(_download_worker, recording_id): recording_id 
-                for recording_id in recording_ids
+                executor.submit(_download_worker, recording_data): recording_data['recording_id']
+                for recording_data in todo_recordings
             }
             
             completed = 0
@@ -332,8 +335,8 @@ class IngestRunner:
                     failed += 1
                 
                 completed += 1
-                pct = (completed / len(recording_ids)) * 100
-                self._update_progress("download", pct, f"Staženo {completed}/{len(recording_ids)} nahrávek (OK: {ok}, FAIL: {failed})")
+                pct = (completed / len(todo_recordings)) * 100
+                self._update_progress("download", pct, f"Staženo {completed}/{len(todo_recordings)} nahrávek (OK: {ok}, FAIL: {failed})")
         
         return results
     
@@ -473,8 +476,7 @@ class IngestRunner:
                 return 0
             
             # 4. Download recordings
-            recording_ids = [r['recording_id'] for r in todo_recordings]
-            download_results = self.download_recordings(recording_ids)
+            download_results = self.download_recordings(todo_recordings)
             
             # 5. Write snapshots
             self.write_snapshots(calls, recordings)

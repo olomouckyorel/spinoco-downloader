@@ -26,7 +26,7 @@ from common.lib import (
     State, Manifest, create_manifest
 )
 
-from .adapter import normalize_recording, normalize_call_level, load_transcript_json, find_transcript_file
+from adapter import normalize_recording, normalize_call_level, load_transcript_json, find_transcript_file
 
 
 def now_utc_iso() -> str:

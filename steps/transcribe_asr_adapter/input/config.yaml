@@ -9,7 +9,7 @@ asr:
   language: "cs"                      # čistě informativní; do manifestu
 
 io:
-  input_run_root: "../ingest_spinoco/output/runs"
+  input_run_root: "C:/Users/MCarek/bh-rag/Moje_Python_projekty/spinoco-download/steps/ingest_spinoco/output/runs"
   max_parallel: 2
 
 retry:

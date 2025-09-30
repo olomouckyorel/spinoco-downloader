@@ -12,24 +12,31 @@ from typing import List, Dict, Any, Optional, Iterator
 from datetime import datetime, timezone
 import httpx
 
-# Import původního SpinocoClient
+# Lazy import - původní SpinocoClient se načte až při vytvoření instance
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
-from src.spinoco_client import SpinocoClient as OriginalSpinocoClient
+
+
+def _make_original_client(api_base: str, token: str):
+    """Pomocná funkce pro lazy import původního SpinocoClient s ENV injekcí."""
+    import os
+    os.environ.setdefault("SPINOCO_API_BASE", api_base)
+    os.environ.setdefault("SPINOCO_TOKEN", token)
+    os.environ.setdefault("SPINOCO_PROTOCOL_VERSION", "2")
+    # lazy import až teď:
+    from src.spinoco_client import SpinocoClient as OriginalSpinocoClient
+    return OriginalSpinocoClient(api_token=token, base_url=api_base)
 
 
 class SpinocoClient:
-    """Použije původní SpinocoClient přímo."""
+    """Použije původní SpinocoClient přímo s lazy importem."""
     
     def __init__(self, api_base_url: str, token: str, page_size: int = 100):
         self.api_base_url = api_base_url.rstrip('/')
         self.token = token
         self.page_size = page_size
         
-        # Použijeme původní SpinocoClient přímo
-        self.client = OriginalSpinocoClient(
-            api_token=token,
-            base_url=api_base_url
-        )
+        # Lazy import původního SpinocoClient s ENV injekcí
+        self._orig = _make_original_client(api_base_url, token)
     
     def list_calls(self, since: Optional[str] = None, limit: Optional[int] = None) -> Iterator[Dict[str, Any]]:
         """
@@ -47,7 +54,7 @@ class SpinocoClient:
         async def _async_list_calls():
             count = 0
             
-            async for call_task in self.original_client.get_completed_calls_with_recordings():
+            async for call_task in self._orig.get_completed_calls_with_recordings():
                 if limit and count >= limit:
                     break
                     
@@ -107,11 +114,26 @@ class SpinocoClient:
         Returns:
             Dict: Detail informace tasku
         """
-        try:
-            response = self.client.get(f"{self.api_base_url}/task/{task_id}")
+        import asyncio
+        
+        async def _async_get_task_detail():
+            response = await self._orig.client.get(f"{self.api_base_url}/task/{task_id}")
             response.raise_for_status()
             return response.json()
-        except httpx.RequestError as e:
+        
+        try:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            try:
+                return loop.run_until_complete(_async_get_task_detail())
+            finally:
+                if loop.is_running():
+                    loop.close()
+        except Exception as e:
             raise RuntimeError(f"Chyba při načítání detailu tasku {task_id}: {e}")
     
     def list_recordings(self, call_task: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -129,26 +151,31 @@ class SpinocoClient:
         task_obj = CallTask(**call_task)
         
         # Použij původní metodu
-        recordings = self.original_client.extract_available_recordings(task_obj)
+        recordings = self._orig.extract_available_recordings(task_obj)
         
         # Konvertuj zpět na dict
         return [recording.dict() for recording in recordings]
     
-    def download_recording(self, recording_id: str, output_path: Path) -> int:
+    def download_recording(self, recording_id: str, output_path: Path, task_id: str = None) -> int:
         """
         Stáhne nahrávku do souboru pomocí původního clientu (sync wrapper).
         
         Args:
             recording_id: ID nahrávky
             output_path: Cesta k výstupnímu souboru
+            task_id: ID úkolu (pokud není zadán, použije se recording_id)
             
         Returns:
             int: Velikost staženého souboru v bajtech
         """
         import asyncio
         
+        # Pokud není task_id zadán, zkusíme použít recording_id
+        if task_id is None:
+            task_id = recording_id
+        
         async def _async_download():
-            audio_data = await self.original_client.download_recording(recording_id)
+            audio_data = await self._orig.download_recording(task_id, recording_id)
             with open(output_path, "wb") as f:
                 f.write(audio_data)
             return len(audio_data)

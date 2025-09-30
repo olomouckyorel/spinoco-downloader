@@ -101,7 +101,12 @@ class TranscriberModule:
         self.logger.info(f"Začínám přepis souboru: {audio_path.name}")
         
         try:
+            # Progress info
+            audio_size_mb = audio_path.stat().st_size / (1024 * 1024)
+            self.logger.info(f"🎤 Audio: {audio_size_mb:.1f} MB, model: {settings.whisper_model}, device: {self.device}")
+            
             # Whisper transcription s high-quality nastavením
+            self.logger.info("⏳ Transkripce běží... (může trvat několik minut)")
             result = self.model.transcribe(
                 str(audio_path),
                 language="cs",  # Explicitní český kód
@@ -110,7 +115,7 @@ class TranscriberModule:
                 beam_size=settings.whisper_beam_size,
                 condition_on_previous_text=settings.condition_on_previous_text,
                 initial_prompt="Toto je nahrávka technické podpory v češtině. Obsahuje konverzaci o kotlích, topení a technických problémech.",
-                verbose=False
+                verbose=True  # Zobrazit progress
             )
             
             # Extrakce metadat z názvu souboru
@@ -256,15 +261,66 @@ class TranscriberModule:
 
 async def main():
     """Hlavní funkce pro spuštění transcriberu"""
+    import argparse
+    import sys
+    
+    parser = argparse.ArgumentParser(description="Spinoco Whisper Transcriber")
+    parser.add_argument('--input', type=str, help='Cesta k jednomu audio souboru (worker mode)')
+    parser.add_argument('--output', type=str, help='Výstupní adresář pro transkripty (worker mode)')
+    parser.add_argument('--no-move', action='store_true', 
+                       help='Nepřesouvat zpracované soubory (pro pipeline/worker mode)')
+    args = parser.parse_args()
+    
     transcriber = TranscriberModule()
     
-    # Zpracování všech čekających souborů
-    stats = await transcriber.process_all_pending()
-    
-    print(f"\\n📊 Statistiky zpracování:")
-    print(f"✅ Úspěšně zpracováno: {stats['processed']}")
-    print(f"❌ Chyby: {stats['failed']}")
-    print(f"📁 Celkem souborů: {stats['total']}")
+    if args.input and args.output:
+        # WORKER MODE: Zpracování jednoho souboru pro pipeline
+        input_path = Path(args.input)
+        output_dir = Path(args.output)
+        
+        if not input_path.exists():
+            transcriber.logger.error(f"Audio soubor neexistuje: {input_path}")
+            print(f"CHYBA: Audio soubor neexistuje: {input_path}")
+            sys.exit(1)
+        
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Zpracuj jeden soubor
+            transcriber.logger.info(f"Worker mode: Zpracovávám {input_path.name}")
+            result = transcriber.transcribe_file(input_path)
+            
+            # Ulož výsledek pomocí save_transcription metody
+            output_file = output_dir / f"{input_path.stem}_transcription.json"
+            transcriber.save_transcription(result, output_file)
+            
+            transcriber.logger.info(f"Worker mode: Úspěšně zpracováno {input_path.name}")
+            print(f"Uspesne zpracovano: {input_path.name}")
+            print(f"Vystup: {output_file}")
+            
+            # V worker mode NEPŘESOUVAT soubor (zůstává v source)
+            if not args.no_move:
+                transcriber.logger.info("Standalone mode: Přesouvám soubor do processed/")
+                transcriber.move_processed_file(input_path, settings.processed_folder)
+            else:
+                transcriber.logger.info("Worker mode: Ponechávám soubor na místě")
+            
+            sys.exit(0)
+            
+        except Exception as e:
+            transcriber.logger.error(f"Worker mode: Zpracování selhalo: {e}")
+            print(f"CHYBA: Zpracovani selhalo: {input_path.name}")
+            print(f"Detail: {e}")
+            sys.exit(1)
+    else:
+        # STANDALONE MODE: Zpracování všech čekájících souborů
+        transcriber.logger.info("Standalone mode: Zpracovávám všechny čekající soubory")
+        stats = await transcriber.process_all_pending()
+        
+        print(f"\\nStatistiky zpracovani:")
+        print(f"Uspesne zpracovano: {stats['processed']}")
+        print(f"Chyby: {stats['failed']}")
+        print(f"Celkem souboru: {stats['total']}")
 
 
 if __name__ == "__main__":

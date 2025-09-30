@@ -1,0 +1,42 @@
+{
+  "schema": "bh.v1.transcripts",
+  "schema_version": "1.0.0",
+  "step_id": "02_transcribe_asr_adapter",
+  "step_run_id": "01K6D28RSRZ21AD8TQ6NQK55RS",
+  "flow_run_id": null,
+  "producer": {
+    "git_sha": "593c4e1",
+    "host": "SERVIS-MCAREK",
+    "user": "MCarek",
+    "processor_version": null
+  },
+  "run_mode": "incr",
+  "started_at_utc": "2025-09-30T10:21:40Z",
+  "finished_at_utc": "2025-09-30T10:21:40Z",
+  "status": "partial",
+  "input_refs": [],
+  "outputs": {
+    "primary": "transcripts_recordings.jsonl",
+    "aux": {
+      "call_level": "transcripts_calls.jsonl"
+    }
+  },
+  "counts": {
+    "recordings": 1,
+    "transcribed": 0,
+    "failed": 1,
+    "segments": 0
+  },
+  "metrics": {
+    "avg_segments_per_recording": 0,
+    "throughput_records_per_min": 0.0
+  },
+  "errors": [
+    {
+      "unit_id": "193c444a-7e91-11f0-a473-2f775d7c125b",
+      "error_key": "FileNotFoundError: Audio soubor neexistuje",
+      "message": "Transcription failed: FileNotFoundError: Audio soubor neexistuje"
+    }
+  ],
+  "notes": null
+}

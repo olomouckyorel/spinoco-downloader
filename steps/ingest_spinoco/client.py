@@ -22,6 +22,10 @@ def _make_original_client(api_base: str, token: str):
     os.environ.setdefault("SPINOCO_API_BASE", api_base)
     os.environ.setdefault("SPINOCO_TOKEN", token)
     os.environ.setdefault("SPINOCO_PROTOCOL_VERSION", "2")
+    # Nastavíme i credentials pro src.config (který se importuje při importu src.spinoco_client)
+    os.environ.setdefault("SPINOCO_API_KEY", token)
+    os.environ.setdefault("SPINOCO_ACCOUNT_ID", "dummy-account-id")  # src.config to vyžaduje ale nepoužívá
+    os.environ.setdefault("SHAREPOINT_SITE_URL", "https://dummy.sharepoint.com")  # src.config to vyžaduje ale nepoužívá
     # lazy import až teď:
     from src.spinoco_client import SpinocoClient as OriginalSpinocoClient
     return OriginalSpinocoClient(api_token=token, base_url=api_base)

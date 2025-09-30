@@ -1,0 +1,8 @@
+{
+  "failed_ids": [
+    "19db0e55-7f22-11f0-a86e-9de2359f45e9",
+    "193c444a-7e91-11f0-a473-2f775d7c125b"
+  ],
+  "reason": "Some recordings failed to transcribe",
+  "retry_command": "--only 19db0e55-7f22-11f0-a86e-9de2359f45e9,193c444a-7e91-11f0-a473-2f775d7c125b"
+}

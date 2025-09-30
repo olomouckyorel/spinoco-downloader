@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Ignoruj extra fieldy z parent .env
         
     def __post_init__(self):
         """Zajistí vytvoření potřebných adresářů"""

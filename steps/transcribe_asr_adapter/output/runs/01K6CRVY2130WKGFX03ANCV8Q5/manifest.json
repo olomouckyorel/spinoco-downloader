@@ -1,0 +1,42 @@
+{
+  "schema": "bh.v1.transcripts",
+  "schema_version": "1.0.0",
+  "step_id": "02_transcribe_asr_adapter",
+  "step_run_id": "01K6CRVY28P17WZRJW4FG9ZE7F",
+  "flow_run_id": null,
+  "producer": {
+    "git_sha": "593c4e1",
+    "host": "SERVIS-MCAREK",
+    "user": "MCarek",
+    "processor_version": null
+  },
+  "run_mode": "incr",
+  "started_at_utc": "2025-09-30T07:37:22Z",
+  "finished_at_utc": "2025-09-30T07:37:22Z",
+  "status": "partial",
+  "input_refs": [],
+  "outputs": {
+    "primary": "transcripts_recordings.jsonl",
+    "aux": {
+      "call_level": "transcripts_calls.jsonl"
+    }
+  },
+  "counts": {
+    "recordings": 1,
+    "transcribed": 0,
+    "failed": 1,
+    "segments": 0
+  },
+  "metrics": {
+    "avg_segments_per_recording": 0,
+    "throughput_records_per_min": 0.0
+  },
+  "errors": [
+    {
+      "unit_id": "193c444a-7e91-11f0-a473-2f775d7c125b",
+      "error_key": "RuntimeError:Transcriber selhal: C:\\Users\\MCarek\\bh-rag\\Moje_Python_projekty\\spinoco-download\\venv\\Scripts\\python.exe: can't open file 'C:\\\\Users\\\\MCarek\\\\bh-rag\\\\Moje_Python_projekty\\\\spinoco-whisper\\\\main.py': [Errno 2] No such file or directory\n",
+      "message": "Transcription failed: RuntimeError:Transcriber selhal: C:\\Users\\MCarek\\bh-rag\\Moje_Python_projekty\\spinoco-download\\venv\\Scripts\\python.exe: can't open file 'C:\\\\Users\\\\MCarek\\\\bh-rag\\\\Moje_Python_projekty\\\\spinoco-whisper\\\\main.py': [Errno 2] No such file or directory\n"
+    }
+  ],
+  "notes": null
+}

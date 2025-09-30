@@ -1,0 +1,5 @@
+{
+  "error": "'TranscribeState' object has no attribute 'mark_transcribed'",
+  "type": "AttributeError",
+  "step_run_id": "01K6CRXRE9WWRCVZ8W2KYCXQNP"
+}

@@ -1,0 +1,42 @@
+{
+  "schema": "bh.v1.transcripts",
+  "schema_version": "1.0.0",
+  "step_id": "02_transcribe_asr_adapter",
+  "step_run_id": "01K6D2SAB3K3A9JFFTQ4E7K9ST",
+  "flow_run_id": null,
+  "producer": {
+    "git_sha": "593c4e1",
+    "host": "SERVIS-MCAREK",
+    "user": "MCarek",
+    "processor_version": null
+  },
+  "run_mode": "incr",
+  "started_at_utc": "2025-09-30T10:30:42Z",
+  "finished_at_utc": "2025-09-30T10:45:49Z",
+  "status": "success",
+  "input_refs": [
+    {
+      "type": "recording_id",
+      "value": "3a243241-8fb0-11f0-9fcd-0763f6d52bb8"
+    }
+  ],
+  "outputs": {
+    "primary": "transcripts_recordings.jsonl",
+    "aux": {
+      "call_level": "transcripts_calls.jsonl"
+    }
+  },
+  "counts": {
+    "recordings": 16,
+    "transcribed": 1,
+    "failed": 0,
+    "skipped": 15,
+    "segments": 61
+  },
+  "metrics": {
+    "avg_segments_per_recording": 61.0,
+    "throughput_records_per_min": 0.06612678145280279
+  },
+  "errors": [],
+  "notes": null
+}

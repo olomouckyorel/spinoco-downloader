@@ -59,7 +59,8 @@ class TranscribeState:
         self.conn.commit()
         
         cursor.execute("SELECT value FROM schema_meta WHERE key = 'schema_version';")
-        current_version = int(cursor.fetchone()[0]) if cursor.fetchone() else 0
+        result = cursor.fetchone()
+        current_version = int(result[0]) if result else 0
         
         if current_version < 1:
             self._apply_migrations(0)
@@ -347,6 +348,7 @@ class TranscribeRunner:
         results = {
             'successful': [],
             'failed': [],
+            'skipped': 0,  # Recordings které nejsou v tomto run_id
             'total_segments': 0
         }
         
@@ -364,7 +366,9 @@ class TranscribeRunner:
                 audio_path = input_run_root / input_run_id / "data" / "audio" / f"{recording_id}.ogg"
                 
                 if not audio_path.exists():
-                    return ("fail", recording_id, None, "FileNotFoundError: Audio soubor neexistuje")
+                    # Audio není v tomto run_id - byl možná zpracován v minulém běhu
+                    # SKIP místo FAIL - to není chyba!
+                    return ("skip", recording_id, None, "Audio soubor není v tomto run_id (možná již zpracován)")
                 
                 # Urči výstupní adresář
                 temp_output_dir = self.data_dir / "temp" / recording_id
@@ -392,7 +396,10 @@ class TranscribeRunner:
                 return ("ok", recording_id, normalized_transcript, None)
                 
             except Exception as e:
-                return ("fail", recording_id, None, f"{type(e).__name__}:{e}")
+                import traceback
+                error_msg = f"{type(e).__name__}: {e}\\n{traceback.format_exc()}"
+                print(f"DEBUG CHYBA pro {recording_id}: {error_msg}")
+                return ("fail", recording_id, None, error_msg)
         
         # Paralelní zpracování
         max_parallel = self.config['io']['max_parallel']
@@ -405,16 +412,15 @@ class TranscribeRunner:
             completed = 0
             ok = 0
             failed = 0
+            skipped = 0
             
             for future in concurrent.futures.as_completed(future_to_recording):
                 status, rec_id, normalized_transcript, error = future.result()
                 
                 if status == "ok":
-                    # DB operace v main threadu
-                    self.state.mark_transcribed(
+                    # Úspěšně zpracováno
+                    self.state.mark_ok(
                         recording_id=rec_id,
-                        asr_model=self.config['asr']['provider'],
-                        settings_hash="dummy_hash",  # TODO: implementovat hash
                         processed_at_utc=now_utc_iso()
                     )
                     
@@ -426,8 +432,15 @@ class TranscribeRunner:
                     })
                     results['total_segments'] += normalized_transcript['metrics']['seg_count']
                     ok += 1
+                    
+                elif status == "skip":
+                    # Audio není v tomto run_id - pravděpodobně už zpracován jinde
+                    # NENÍ TO CHYBA - jen skip
+                    skipped += 1
+                    results['skipped'] += 1  # Update results dict
+                    
                 else:
-                    # DB operace v main threadu
+                    # Skutečná chyba při transkripci
                     retry_count = self.state.mark_failed_transient(
                         recording_id=rec_id,
                         error_key=f"asr_error: {error}",
@@ -451,7 +464,7 @@ class TranscribeRunner:
                 
                 completed += 1
                 pct = (completed / len(recordings)) * 100
-                self._update_progress("transcription", pct, f"Zpracováno {completed}/{len(recordings)} nahrávek (OK: {ok}, FAIL: {failed})")
+                self._update_progress("transcription", pct, f"Zpracováno {completed}/{len(recordings)} nahrávek (OK: {ok}, SKIP: {skipped}, FAIL: {failed})")
         
         return results
     
@@ -489,9 +502,10 @@ class TranscribeRunner:
     def write_metrics(self, results: Dict[str, Any], runtime_s: float):
         """Zapíše metriky do metrics.json."""
         metrics = {
-            "recordings_total": len(results['successful']) + len(results['failed']),
+            "recordings_total": len(results['successful']) + len(results['failed']) + results['skipped'],
             "transcribed_ok": len(results['successful']),
             "failed": len(results['failed']),
+            "skipped": results['skipped'],
             "total_segments": results['total_segments'],
             "avg_segments_per_recording": results['total_segments'] / len(results['successful']) if results['successful'] else 0,
             "runtime_s": runtime_s,
@@ -521,6 +535,7 @@ class TranscribeRunner:
             recordings=metrics['recordings_total'],
             transcribed=metrics['transcribed_ok'],
             failed=metrics['failed'],
+            skipped=metrics['skipped'],
             segments=metrics['total_segments']
         )
         
@@ -575,6 +590,17 @@ class TranscribeRunner:
                 print("Žádné nahrávky k transkripci")
                 return 0
             
+            # 1b. Upsert metadata do state (aby se vědělo, co je k dispozici)
+            for rec in recordings_metadata:
+                # call_id je spinoco_call_guid
+                call_id = rec.get('spinoco_call_guid', rec['spinoco_recording_id'])
+                self.state.upsert_transcript(
+                    recording_id=rec['recording_id'],
+                    call_id=call_id,
+                    asr_settings_hash='',
+                    transcript_hash=''
+                )
+            
             # 2. Urči TODO pro transkripci
             todo_recordings = self.state.list_todo_for_transcription(max_retry=args.max_retry)
             
@@ -603,11 +629,11 @@ class TranscribeRunner:
             # 6. Finalizuj manifest
             self.finalize_manifest(results, metrics)
             
-            print(f"✅ Transkripce dokončena: {metrics['transcribed_ok']} zpracováno, {metrics['failed']} chyb")
+            print(f"Transkripce dokončena: {metrics['transcribed_ok']} zpracováno, {metrics['skipped']} přeskočeno, {metrics['failed']} chyb")
             return 0 if metrics['failed'] == 0 else 1
             
         except Exception as e:
-            print(f"❌ Kritická chyba: {e}")
+            print(f"CHYBA: Kritická chyba: {e}")
             
             # Zapiš error.json
             error_data = {

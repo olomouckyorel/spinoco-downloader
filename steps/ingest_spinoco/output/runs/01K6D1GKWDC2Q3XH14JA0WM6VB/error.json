@@ -1,5 +1,0 @@
-{
-  "error": "'charmap' codec can't encode character '\\u2705' in position 0: character maps to <undefined>",
-  "type": "UnicodeEncodeError",
-  "step_run_id": "01K6D1GKWDC2Q3XH14JA0WM6VB"
-}

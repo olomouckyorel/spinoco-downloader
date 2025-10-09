@@ -1,9 +1,0 @@
-{
-  "recordings_total": 1,
-  "transcribed_ok": 1,
-  "failed": 0,
-  "total_segments": 10,
-  "avg_segments_per_recording": 10.0,
-  "runtime_s": 774.9097318649292,
-  "throughput_records_per_min": 0.07742837330949705
-}

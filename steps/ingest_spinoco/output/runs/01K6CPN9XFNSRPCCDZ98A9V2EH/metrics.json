@@ -1,9 +1,0 @@
-{
-  "calls": 15,
-  "recordings_total": 6,
-  "downloaded_ok": 5,
-  "failed": 1,
-  "bytes_downloaded": 9263445,
-  "runtime_s": 150.78150296211243,
-  "throughput_mbps": 0.058590141392619845
-}

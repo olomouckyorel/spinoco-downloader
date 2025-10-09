@@ -1,8 +1,0 @@
-{
-  "failed_ids": [
-    "3947a831-88c8-11f0-837a-41bbf3fc13fe",
-    "3f593457-8f13-11f0-8323-f700317adc72"
-  ],
-  "reason": "Some recordings failed to transcribe",
-  "retry_command": "--only 3947a831-88c8-11f0-837a-41bbf3fc13fe,3f593457-8f13-11f0-8323-f700317adc72"
-}

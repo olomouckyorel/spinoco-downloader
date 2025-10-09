@@ -4,13 +4,13 @@
 asr:
   provider: "existing"                # explicitně
   mode: "run"                        # 'run' = spouštět tvůj skript, 'import' = jen načíst existující JSONy
-  run_cmd: "{python} C:/Users/MCarek/bh-rag/Moje_Python_projekty/spinoco-download/spinoco-whisper/main.py --input {audio} --output {out_dir} --no-move"
+  run_cmd: "{python} C:/Users/MCarek/bh-rag/Moje_Python_projekty/spinoco-download/spinoco-whisper/main.py --input {audio} --output {out_dir} --no-move --use-dual-channel-vad"
   outputs_glob: "**/*_transcription.json"   # pro 'import' nebo když tvůj skript sám ukládá JSON
   language: "cs"                      # čistě informativní; do manifestu
 
 io:
   input_run_root: "C:/Users/MCarek/bh-rag/Moje_Python_projekty/spinoco-download/steps/ingest_spinoco/output/runs"
-  max_parallel: 2
+  max_parallel: 4
 
 retry:
   max_retry: 2

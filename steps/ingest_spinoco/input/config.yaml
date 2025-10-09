@@ -9,6 +9,7 @@ auth:
 fetch:
   page_size: 100
   since: null  # ISO timestamp pro backfill, null pro incr
+  max_records: 3  # Limit pro testování - stáhne 3 nejstarší nahrávky
 
 retry:
   max_retry: 3

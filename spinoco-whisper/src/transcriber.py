@@ -6,6 +6,7 @@ import json
 import asyncio
 import whisper
 import torch
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -13,6 +14,14 @@ import shutil
 
 from .config import settings
 from .logger import logger
+
+try:
+    import librosa
+except ImportError:
+    librosa = None
+
+import subprocess
+import tempfile
 
 
 class TranscriberModule:
@@ -33,6 +42,34 @@ class TranscriberModule:
             self.device = settings.whisper_device
             
         self.logger.info(f"Whisper device nastaven na: {self.device}")
+    
+    def _preprocess_audio_ffmpeg(self, audio_path: Path) -> str:
+        """
+        FFmpeg preprocessing: OGG/Opus -> 16kHz mono WAV
+        Řeší problém s Whisper přeskočením řeči u 8kHz telefonních nahrávek
+        """
+        tmpdir = Path(tempfile.mkdtemp(prefix="whisper_preproc_"))
+        wav_path = tmpdir / "preprocessed.wav"
+        
+        # FFmpeg: dekódování + resampling + mono konverze + RESET časových značek
+        cmd = [
+            "ffmpeg", "-y", "-i", str(audio_path),
+            "-map", "0:a:0",  # vezmi první audio stream
+            "-ac", "1",        # Mono (1 kanál)
+            "-ar", "16000",    # 16kHz sampling
+            "-c:a", "pcm_s16le", # PCM 16-bit little endian
+            "-avoid_negative_ts", "make_zero",  # resetuj PTS na 0
+            "-fflags", "+genpts",  # vygeneruj perfektní časové značky
+            str(wav_path)
+        ]
+        
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.logger.info(f"Audio preprocessed: {audio_path.name} -> {wav_path.name}")
+            return str(wav_path)
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"FFmpeg preprocessing failed: {e}")
+            raise
         
     def _load_model(self):
         """Načtení Whisper modelu (lazy loading)"""
@@ -48,6 +85,78 @@ class TranscriberModule:
                 self.logger.error(f"Chyba při načítání Whisper modelu: {e}")
                 raise
                 
+    def _load_audio_for_diarization(self, audio_path: Path):
+        """
+        Načte audio soubor pro diarization (stereo).
+        
+        Returns:
+            Tuple (left_channel, right_channel, sample_rate) nebo None
+        """
+        if librosa is None:
+            return None
+        
+        try:
+            # Načti audio jako stereo
+            audio, sr = librosa.load(str(audio_path), sr=None, mono=False)
+            
+            # Pokud je mono, nemůžeme detekovat
+            if audio.ndim == 1:
+                self.logger.warning("Audio je MONO, stereo diarization není možná")
+                return None
+            
+            left = audio[0]
+            right = audio[1]
+            
+            return (left, right, sr)
+            
+        except Exception as e:
+            self.logger.warning(f"Chyba při načítání audio pro diarization: {e}")
+            return None
+    
+    def _detect_speaker_from_stereo(self, audio_data, segment_start: float, segment_end: float) -> str:
+        """
+        Detekuje mluvčího na základě stereo balance (LEFT vs RIGHT kanál).
+        
+        Args:
+            audio_data: Tuple (left, right, sr) z _load_audio_for_diarization
+            segment_start: Začátek segmentu v sekundách
+            segment_end: Konec segmentu v sekundách
+            
+        Returns:
+            "customer" nebo "technician"
+        """
+        if audio_data is None:
+            return "unknown"
+        
+        try:
+            left, right, sr = audio_data
+            
+            # Extrahuj segment
+            start_sample = int(segment_start * sr)
+            end_sample = int(segment_end * sr)
+            
+            left_segment = left[start_sample:end_sample]
+            right_segment = right[start_sample:end_sample]
+            
+            # Spočti RMS energy
+            left_energy = np.sqrt(np.mean(left_segment**2))
+            right_energy = np.sqrt(np.mean(right_segment**2))
+            
+            # Threshold: LEFT musí být 1.5x silnější než RIGHT (nebo naopak)
+            threshold = 1.5
+            
+            if left_energy > right_energy * threshold:
+                return "customer"  # LEFT = zákazník
+            elif right_energy > left_energy * threshold:
+                return "technician"  # RIGHT = technik
+            else:
+                # Překryv nebo nejasné - použij dominantní kanál
+                return "customer" if left_energy > right_energy else "technician"
+                
+        except Exception as e:
+            self.logger.warning(f"Chyba při detekci mluvčího: {e}")
+            return "unknown"
+    
     def _extract_metadata_from_filename(self, filename: str) -> Dict[str, Any]:
         """
         Extrahuje metadata z názvu souboru
@@ -86,6 +195,254 @@ class TranscriberModule:
             self.logger.warning(f"Chyba při parsování názvu souboru {filename}: {e}")
             return {"original_filename": filename}
     
+    # ========== DUAL-CHANNEL + VAD TRANSCRIPTION ==========
+    
+    def _split_stereo_to_mono(self, input_ogg: Path) -> tuple[str, str]:
+        """
+        Rozdělí stereo OGG na 2 mono WAV soubory pomocí FFmpeg pan filtru.
+        
+        Returns:
+            (left_wav_path, right_wav_path)
+        """
+        tmpdir = Path(tempfile.mkdtemp(prefix="dual_channel_vad_"))
+        left_wav = tmpdir / "left.wav"
+        right_wav = tmpdir / "right.wav"
+        
+        # LEFT kanál (FL = Front Left)
+        cmd_left = [
+            "ffmpeg", "-y", "-i", str(input_ogg),
+            "-af", "pan=mono|c0=FL",
+            "-ar", "16000",
+            "-c:a", "pcm_s16le",
+            str(left_wav)
+        ]
+        
+        # RIGHT kanál (FR = Front Right)
+        cmd_right = [
+            "ffmpeg", "-y", "-i", str(input_ogg),
+            "-af", "pan=mono|c0=FR",
+            "-ar", "16000",
+            "-c:a", "pcm_s16le",
+            str(right_wav)
+        ]
+        
+        self.logger.info("Rozdeluji stereo na 2 mono WAV (pan filter FL/FR)...")
+        
+        subprocess.run(cmd_left, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(cmd_right, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        self.logger.info(f"  LEFT:  {left_wav}")
+        self.logger.info(f"  RIGHT: {right_wav}")
+        
+        return str(left_wav), str(right_wav)
+    
+    def _get_speech_timestamps_silero(self, wav_path: str) -> List[Dict[str, float]]:
+        """
+        Použije Silero VAD k detekci speech segments.
+        
+        Returns:
+            List of {"start": float, "end": float} in seconds
+        """
+        self.logger.info("  Detekuji speech segments (Silero VAD)...")
+        
+        # Načti Silero VAD model (automaticky stahuje při prvním použití)
+        model, utils = torch.hub.load(
+            repo_or_dir='snakers4/silero-vad',
+            model='silero_vad',
+            force_reload=False,
+            onnx=False,
+            trust_repo=True  # Důvěřujeme Silero VAD
+        )
+        
+        (get_speech_timestamps, _, read_audio, *_) = utils
+        
+        # Načti audio (Silero očekává 16kHz mono)
+        wav = read_audio(wav_path, sampling_rate=16000)
+        
+        # Detekce speech timestamps
+        speech_timestamps = get_speech_timestamps(
+            wav,
+            model,
+            sampling_rate=16000,
+            threshold=0.5,          # Pravděpodobnost řeči (0.5 = balanced)
+            min_speech_duration_ms=250,   # Min délka řeči (250ms)
+            min_silence_duration_ms=500,  # Min délka ticha mezi segmenty (500ms)
+            window_size_samples=1536,     # 96ms @ 16kHz
+            speech_pad_ms=30              # Padding kolem řeči (30ms)
+        )
+        
+        # Převod na sekundy
+        segments = []
+        for ts in speech_timestamps:
+            segments.append({
+                "start": ts['start'] / 16000.0,  # samples -> seconds
+                "end": ts['end'] / 16000.0
+            })
+        
+        total_speech = sum(s['end'] - s['start'] for s in segments)
+        self.logger.info(f"    -> {len(segments)} speech segments, celkem {total_speech:.1f}s")
+        
+        return segments
+    
+    def _extract_audio_segment(self, wav_path: str, start: float, end: float, output_path: str):
+        """
+        Extrahuje audio segment z WAV souboru pomocí FFmpeg.
+        """
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", wav_path,
+            "-ss", str(start),
+            "-to", str(end),
+            "-c:a", "pcm_s16le",
+            output_path
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    def _transcribe_channel_with_vad(
+        self,
+        wav_path: str, 
+        speaker_label: str,
+        tmpdir: Path
+    ) -> List[Dict[str, Any]]:
+        """
+        Přepíše jeden mono kanál Whisperem s VAD preprocessing.
+        
+        1. Detekuje speech segments pomocí Silero VAD
+        2. Extrahuje jen speech segments
+        3. Přepisuje každý segment samostatně
+        4. Mapuje zpět na původní čas
+        """
+        self.logger.info(f"Prepisuji {speaker_label} (s VAD preprocessing)...")
+        
+        # 1. Detekce speech segments
+        speech_segments = self._get_speech_timestamps_silero(wav_path)
+        
+        if not speech_segments:
+            self.logger.warning(f"  POZOR: Zadne speech segments detekovany v {speaker_label}!")
+            return []
+        
+        # 2. Přepis každého speech segmentu
+        all_segments = []
+        segment_dir = tmpdir / f"{speaker_label}_segments"
+        segment_dir.mkdir(exist_ok=True)
+        
+        for i, speech in enumerate(speech_segments):
+            # Extrahuj audio segment
+            segment_path = segment_dir / f"seg_{i:03d}.wav"
+            self._extract_audio_segment(wav_path, speech['start'], speech['end'], str(segment_path))
+            
+            # Whisper přepis (jen pro tento krátký segment)
+            result = self.model.transcribe(
+                str(segment_path),
+                fp16=False,
+                condition_on_previous_text=False,  # Každý segment nezávisle
+                temperature=0.0,
+                no_speech_threshold=0.6,  # Vyšší (již máme VAD)
+                logprob_threshold=-0.5,   # Vyšší důvěra
+                compression_ratio_threshold=2.4
+            )
+            
+            # Přidej přeložené segmenty s časovým offsetem
+            for seg in result["segments"]:
+                all_segments.append({
+                    "start": speech['start'] + seg['start'],  # Mapuj zpět na original
+                    "end": speech['start'] + seg['end'],
+                    "text": seg['text'],
+                    "speaker": speaker_label
+                })
+        
+        self.logger.info(f"  {speaker_label}: {len(all_segments)} segmentu z {len(speech_segments)} speech bloku")
+        return all_segments
+    
+    def transcribe_file_dual_channel_vad(self, audio_path: Path) -> Dict[str, Any]:
+        """
+        Dual-channel transcription s Silero VAD preprocessing.
+        
+        Tento přístup rozdělí stereo nahrávku na 2 mono kanály (LEFT = customer, RIGHT = technician),
+        použije Silero VAD k detekci speech segments, a přepíše každý kanál samostatně.
+        Výsledek eliminuje hallucinations a správně rozpoznává mluvčí.
+        
+        Returns:
+            Dict s výsledky přepisu (stejný formát jako transcribe_file)
+        """
+        self._load_model()
+        
+        self.logger.info(f"Zacinam DUAL-CHANNEL + VAD prepis souboru: {audio_path.name}")
+        
+        try:
+            # Progress info
+            audio_size_mb = audio_path.stat().st_size / (1024 * 1024)
+            self.logger.info(f"Audio: {audio_size_mb:.1f} MB, model: {settings.whisper_model}, device: {self.device}")
+            
+            # 1. Rozdělení na 2 mono kanály
+            self.logger.info("Rozdeluji stereo na LEFT (customer) + RIGHT (technician)...")
+            left_wav, right_wav = self._split_stereo_to_mono(audio_path)
+            tmpdir = Path(left_wav).parent
+            
+            # 2. Přepis LEFT kanál (zákazník) s VAD
+            left_segments = self._transcribe_channel_with_vad(left_wav, "customer", tmpdir)
+            
+            # 3. Přepis RIGHT kanál (technik) s VAD
+            right_segments = self._transcribe_channel_with_vad(right_wav, "technician", tmpdir)
+            
+            # 4. Sloučení segmentů podle času
+            self.logger.info("Slucuji segmenty podle casu...")
+            all_segments = left_segments + right_segments
+            all_segments.sort(key=lambda x: x["start"])
+            
+            self.logger.info(f"  Celkem: {len(all_segments)} segmentu (customer: {len(left_segments)}, technician: {len(right_segments)})")
+            
+            # 5. Sestavení kompletního textu
+            full_text = " ".join(seg["text"].strip() for seg in all_segments)
+            
+            # 6. Cleanup temporary files
+            try:
+                import shutil
+                shutil.rmtree(tmpdir)
+                self.logger.info("Temporary soubory vycisteny")
+            except Exception as e:
+                self.logger.warning(f"Nepodarilo se vycistit temporary soubory: {e}")
+            
+            # 7. Extrakce metadat z názvu souboru
+            file_metadata = self._extract_metadata_from_filename(audio_path.name)
+            
+            # 8. Sestavení výsledku (stejný formát jako transcribe_file)
+            transcription_result = {
+                "transcription": {
+                    "text": full_text,
+                    "language": "cs",  # Předpokládáme češtinu
+                    "segments": all_segments
+                },
+                "metadata": {
+                    **file_metadata,
+                    "transcribed_at": datetime.now().isoformat(),
+                    "whisper_model": settings.whisper_model,
+                    "audio_file_size": audio_path.stat().st_size,
+                    "audio_file_path": str(audio_path),
+                    "transcription_method": "dual-channel-vad"
+                },
+                "processing_info": {
+                    "device_used": self.device,
+                    "method": "dual-channel + silero-vad",
+                    "left_channel_segments": len(left_segments),
+                    "right_channel_segments": len(right_segments)
+                }
+            }
+            
+            self.logger.info(
+                f"Dual-channel + VAD prepis dokoncen: {audio_path.name}",
+                text_length=len(full_text),
+                segments_count=len(all_segments)
+            )
+            
+            return transcription_result
+            
+        except Exception as e:
+            self.logger.error(f"Chyba pri dual-channel + VAD prepisu {audio_path.name}: {e}")
+            raise
+    
+    # ========== ORIGINAL TRANSCRIPTION METHOD ==========
+    
     def transcribe_file(self, audio_path: Path) -> Dict[str, Any]:
         """
         Přepíše jeden audio soubor pomocí Whisper
@@ -105,18 +462,44 @@ class TranscriberModule:
             audio_size_mb = audio_path.stat().st_size / (1024 * 1024)
             self.logger.info(f"🎤 Audio: {audio_size_mb:.1f} MB, model: {settings.whisper_model}, device: {self.device}")
             
-            # Whisper transcription s high-quality nastavením
+            # FFmpeg preprocessing pro lepší výsledky (řeší přeskočení řeči)
+            self.logger.info("🔧 Preprocessing audio přes FFmpeg...")
+            preprocessed_path = self._preprocess_audio_ffmpeg(audio_path)
+            
+            # Whisper transcription s minimalistickými parametry (jako v asr_fix)
             self.logger.info("⏳ Transkripce běží... (může trvat několik minut)")
             result = self.model.transcribe(
-                str(audio_path),
-                language="cs",  # Explicitní český kód
-                temperature=settings.whisper_temperature,
-                best_of=settings.whisper_best_of,
-                beam_size=settings.whisper_beam_size,
-                condition_on_previous_text=settings.condition_on_previous_text,
-                initial_prompt="Toto je nahrávka technické podpory v češtině. Obsahuje konverzaci o kotlích, topení a technických problémech.",
-                verbose=True  # Zobrazit progress
+                preprocessed_path,
+                # Minimalistické parametry - přesně jako v asr_fix/transcribe_fixed.py
+                fp16=False,
+                condition_on_previous_text=True,
+                temperature=0.0,
+                no_speech_threshold=0.0,
+                logprob_threshold=-1.0,
+                compression_ratio_threshold=2.4
             )
+            
+            # Cleanup preprocessed souboru
+            try:
+                Path(preprocessed_path).unlink()
+                Path(preprocessed_path).parent.rmdir()
+                self.logger.info("Preprocessed soubor vyčištěn")
+            except Exception as e:
+                self.logger.warning(f"Nepodařilo se vyčistit preprocessed soubor: {e}")
+            
+            # Detekce mluvčích pro každý segment (stereo-based diarization)
+            self.logger.info("Detekuji mluvci na zaklade stereo kanalu...")
+            audio_data = self._load_audio_for_diarization(audio_path)
+            
+            segments_with_speakers = []
+            for segment in result["segments"]:
+                speaker = self._detect_speaker_from_stereo(
+                    audio_data,  # Předáme už načtené audio
+                    segment["start"], 
+                    segment["end"]
+                )
+                segment_with_speaker = {**segment, "speaker": speaker}
+                segments_with_speakers.append(segment_with_speaker)
             
             # Extrakce metadat z názvu souboru
             file_metadata = self._extract_metadata_from_filename(audio_path.name)
@@ -126,7 +509,7 @@ class TranscriberModule:
                 "transcription": {
                     "text": result["text"].strip(),
                     "language": result["language"],
-                    "segments": result["segments"]
+                    "segments": segments_with_speakers  # Segmenty s informací o mluvčím
                 },
                 "metadata": {
                     **file_metadata,
@@ -269,6 +652,8 @@ async def main():
     parser.add_argument('--output', type=str, help='Výstupní adresář pro transkripty (worker mode)')
     parser.add_argument('--no-move', action='store_true', 
                        help='Nepřesouvat zpracované soubory (pro pipeline/worker mode)')
+    parser.add_argument('--use-dual-channel-vad', action='store_true',
+                       help='Použít dual-channel + Silero VAD přepis (lepší diarization, eliminuje hallucinations)')
     args = parser.parse_args()
     
     transcriber = TranscriberModule()
@@ -286,9 +671,15 @@ async def main():
         output_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            # Zpracuj jeden soubor
+            # Zpracuj jeden soubor - volba mezi original/dual-channel metodou
             transcriber.logger.info(f"Worker mode: Zpracovávám {input_path.name}")
-            result = transcriber.transcribe_file(input_path)
+            
+            if args.use_dual_channel_vad:
+                transcriber.logger.info("Použití DUAL-CHANNEL + VAD metody")
+                result = transcriber.transcribe_file_dual_channel_vad(input_path)
+            else:
+                transcriber.logger.info("Použití ORIGINAL metody")
+                result = transcriber.transcribe_file(input_path)
             
             # Ulož výsledek pomocí save_transcription metody
             output_file = output_dir / f"{input_path.stem}_transcription.json"

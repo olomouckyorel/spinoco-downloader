@@ -447,7 +447,8 @@ class IngestRunner:
         try:
             # 1. Fetch calls
             since = args.since or self.config['fetch'].get('since')
-            calls = self.fetch_calls(since=since, limit=args.limit)
+            limit = args.limit or self.config['fetch'].get('max_records')
+            calls = self.fetch_calls(since=since, limit=limit)
             
             if not calls:
                 print("Žádné hovory k zpracování")
@@ -488,7 +489,7 @@ class IngestRunner:
             # 7. Finalize manifest
             self.finalize_manifest(calls, recordings, download_results, metrics)
             
-            print(f"✅ Ingest dokončen: {metrics['downloaded_ok']} staženo, {metrics['failed']} chyb")
+            print(f"Ingest dokoncen: {metrics['downloaded_ok']} stazeno, {metrics['failed']} chyb")
             return 0 if metrics['failed'] == 0 else 1
             
         except Exception as e:

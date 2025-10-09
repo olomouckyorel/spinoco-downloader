@@ -1,0 +1,22 @@
+# Konfigurace pro steps/04_format_markdown
+
+format:
+  include_metadata: true      # Zahrnout metadata sekci v Markdown
+  time_format: "HH:MM:SS"    # Formát časování
+
+input:
+  calls_file: "transcripts_calls_redacted.jsonl"  # Call-level anonymizované transkripty
+
+io:
+  input_run_root: "C:/Users/MCarek/bh-rag/Moje_Python_projekty/spinoco-download/steps/anonymize/output/runs"
+
+output:
+  markdown_dir: "markdown"  # Složka pro .md soubory
+
+logging:
+  level: "INFO"
+  format: "text"
+
+
+
+
